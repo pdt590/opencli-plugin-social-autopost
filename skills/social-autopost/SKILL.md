@@ -18,7 +18,10 @@ These rules apply equally to `facebook post-person`, `facebook post-group` and
    connected profile. With several connected profiles and no prior choice, ask once.
    With one profile use default routing and record its context ID. When a profile is
    explicitly selected, put `--profile <chosen>` before the platform in every command.
-2. If disconnected, reconnect Browser Bridge in the existing browser and verify
+2. If a command reports `daemonRunning: false` or no connected profile is available,
+   run `opencli daemon restart` once to restart OpenCLI, then run
+   `opencli profile list` again before continuing. This restarts OpenCLI, not Chrome.
+   If still disconnected, reconnect Browser Bridge in the existing browser and verify
    `profile list` again (poll every two seconds for up to 30 seconds after reconnection).
    Do not silently switch profiles. If the connection stays unavailable, stop and
    report it; if Chrome is closed, ask the user to open it manually.
