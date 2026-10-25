@@ -41,11 +41,12 @@ export async function runPost(first, second, { resolveInput, verifyTarget, comma
     if (typeof ownedTab !== 'string' || !ownedTab) throw new CommandExecutionError('OpenCLI did not return the task tab identity');
     await page.selectTab(ownedTab);
     progressFile = path.join(input.screenshotDir, `progress-${ownedTab.replace(/[^a-zA-Z0-9_-]/g, '_')}.json`);
-    const reportProgress = next => {
+    const reportProgress = (next, details = {}) => {
       stage = next;
       fs.writeFileSync(progressFile, JSON.stringify({ task_tab: ownedTab, stage, mode: input.mode,
         target_url: input.targetUrl, updated_at: new Date().toISOString(),
         submission_may_have_started: ['submit-attempt', 'verify-outcome', 'complete'].includes(stage) && input.mode === 'live',
+        ...details,
       }, null, 2));
     };
     rows = await preparePost(page, input, timing, verifyTarget, resultTarget, reportProgress);
@@ -93,6 +94,9 @@ async function preparePost(page, input, timing, verifyTarget, resultTarget, repo
   if (input.slow) await delay(600);
   reportProgress('insert-caption');
   await insertCaption(page, input.caption, {
+    onProgress: ({ insertedGraphemes, totalGraphemes }) => reportProgress('insert-caption', {
+      caption_inserted_graphemes: insertedGraphemes, caption_total_graphemes: totalGraphemes,
+    }),
     slow: input.slow,
     screenshotDir: input.screenshotDir,
     timeoutMs: timing.captionTimeoutMs,

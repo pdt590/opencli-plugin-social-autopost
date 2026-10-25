@@ -73,6 +73,35 @@ it('does not silently fall back when paced input is unavailable', async () => {
   await expect(insertCaption(page, 'Caption', { screenshotDir: dir, slow: true })).rejects.toThrow(/insertText|paced/i);
 });
 
+it('finishes a long caption within the command budget on a one-second Bridge', async () => {
+  const page = browser();
+  const caption = 'Chào bạn 🌿. '.repeat(500);
+  const started = Date.now();
+  page.evaluate.mockImplementation(async script => {
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    return String(script).includes('__opencliPluginArgs') ? { verified: true } : { focused: true, text: '' };
+  });
+  page.insertText.mockImplementation(async () => new Promise(resolve => setTimeout(resolve, 1000)));
+  const pending = insertCaption(page, caption, { screenshotDir: dir, slow: true });
+  await vi.runAllTimersAsync();
+  await expect(pending).resolves.toMatchObject({ inserted: true });
+  expect(Date.now() - started).toBeLessThan(300_000);
+  expect(page.insertText.mock.calls.map(([chunk]) => chunk).join('')).toBe(caption);
+});
+
+it('records completed input and preserves the Bridge error without retrying', async () => {
+  const page = browser();
+  const onProgress = vi.fn();
+  page.insertText.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('insert-text timed out after 30s'));
+  const pending = insertCaption(page, 'A caption long enough for several chunks.', {
+    screenshotDir: dir, slow: true, onProgress,
+  }).catch(error => error);
+  await vi.runAllTimersAsync();
+  expect((await pending).message).toContain('insert-text timed out after 30s');
+  expect(onProgress).toHaveBeenLastCalledWith({ insertedGraphemes: 12, totalGraphemes: 41 });
+  expect(page.insertText).toHaveBeenCalledTimes(2);
+});
+
 it.each([resolveInputs, resolvePersonInputs])('resolves opt-in slow mode for either command', resolve => {
   const input = { caption: 'Draft', 'group-url': 'https://www.facebook.com/groups/test' };
   expect(resolve(input).slow).toBe(false);

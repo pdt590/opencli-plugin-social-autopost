@@ -385,7 +385,7 @@ export async function openComposer(page, { screenshotDir, timeoutMs = 10000, int
   return { trigger: clicked, dialog };
 }
 
-export async function insertCaption(page, caption, { screenshotDir, timeoutMs = 10000, intervalMs = 250, slow = false } = {}) {
+export async function insertCaption(page, caption, { screenshotDir, timeoutMs = 10000, intervalMs = 250, slow = false, onProgress = () => {} } = {}) {
   const focused = await page.evaluate(FOCUS_EDITOR_SCRIPT);
   if (!focused?.focused) {
     const screenshot = await captureScreenshot(page, screenshotDir, 'composer-editor-not-found');
@@ -399,8 +399,13 @@ export async function insertCaption(page, caption, { screenshotDir, timeoutMs = 
     }
     // Segment by grapheme so Vietnamese combining marks and emoji stay intact.
     const units = Array.from(new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(caption), part => part.segment);
+    // Each chunk costs two Bridge round trips. Keep long captions near 100
+    // chunks while retaining pauses and a bounded, Unicode-safe insertion size.
+    const chunkSize = Math.min(120, Math.max(12, Math.ceil(units.length / 100)));
+    let insertedGraphemes = 0;
+    onProgress({ insertedGraphemes, totalGraphemes: units.length });
     try {
-      for (let index = 0; index < units.length; index += 12) {
+      for (let index = 0; index < units.length; index += chunkSize) {
         if (index > 0) {
           await delay(200);
           // React editors can restore a stale selection between insertions.
@@ -408,11 +413,13 @@ export async function insertCaption(page, caption, { screenshotDir, timeoutMs = 
           const caret = await page.evaluate(FOCUS_EDITOR_END_SCRIPT);
           if (!caret?.focused) throw new Error('Composer editor disappeared');
         }
-        await page.insertText(units.slice(index, index + 12).join(''));
+        await page.insertText(units.slice(index, index + chunkSize).join(''));
+        insertedGraphemes = Math.min(index + chunkSize, units.length);
+        onProgress({ insertedGraphemes, totalGraphemes: units.length });
       }
-    } catch {
+    } catch (error) {
       const screenshot = await captureScreenshot(page, screenshotDir, 'paced-input-interrupted');
-      throw new CommandExecutionError(`Paced input stopped after an interrupted insert. Review the partial draft manually; no fallback or retry was attempted. Screenshot: ${screenshot}`);
+      throw new CommandExecutionError(`Paced input stopped after ${insertedGraphemes}/${units.length} confirmed graphemes. Bridge error: ${error.message || String(error)}. The interrupted chunk may still complete; review the partial draft manually. No fallback or retry was attempted. Screenshot: ${screenshot}`);
     }
     if (await captionVerified(page, caption, { timeoutMs, intervalMs })) {
       return { inserted: true, method: 'paced-insertText' };

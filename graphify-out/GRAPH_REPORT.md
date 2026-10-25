@@ -1,7 +1,7 @@
-# Graph Report - opencli-plugin-fb-autopost  (2026-10-23)
+# Graph Report - opencli-plugin-fb-autopost  (2026-10-25)
 
 ## Corpus Check
-- 51 files · ~22,443 words
+- 51 files · ~22,724 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 6 file(s) not represented in the graph (top: (none) 4, .example 2)
 
