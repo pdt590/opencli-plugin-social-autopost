@@ -236,6 +236,9 @@ export function isRecoverableFileInputError(error) {
     message.includes('not allowed') ||
     message.includes('not-allowed') ||
     message.includes('notallowederror') ||
+    message.includes('access denied') ||
+    message.includes('workspace roots') ||
+    message.includes('configured workspace') ||
     message.includes('file input') ||
     message.includes('input') ||
     message.includes('node') ||

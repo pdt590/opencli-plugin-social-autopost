@@ -23,13 +23,26 @@ These rules apply equally to `facebook post-person`, `facebook post-group` and
    `opencli profile list` again before continuing. This restarts OpenCLI, not Chrome.
    If still disconnected, reconnect Browser Bridge in the existing browser and verify
    `profile list` again (poll every two seconds for up to 30 seconds after reconnection).
-   Do not silently switch profiles. If the connection stays unavailable, stop and
-   report it; if Chrome is closed, ask the user to open it manually.
-3. Never run a Chrome/Chromium/Playwright launcher, create a browser process/profile,
-   incognito session or temporary user-data directory, or restart/kill Chrome.
-   Missing processes under RDP/SSH/services/containers do not prove Chrome is closed.
-   Starting Chrome requires a separate explicit request. Do not invent DISPLAY, Xvfb,
-   headless or no-sandbox workarounds. Resolve login/challenge manually.
+   Do not silently switch profiles. If still no profile connects, go to rule 3.
+3. **Auto-open Chrome GUI when it is not running.** If no profile connects after
+   rule 2, run `bash ~/.hermes/skills/social-autopost/scripts/ensure-chrome.sh`
+   (no explicit user request needed). The script checks for a `chrome` process of the
+   current user (`pgrep -u $UID -x chrome`); only when none exists does it launch
+   `google-chrome --restore-last-session` detached (`setsid … &`) in the user's real
+   desktop session. Agent shells usually lack `DISPLAY`, so the script copies
+   `DISPLAY`/`WAYLAND_DISPLAY`/`XAUTHORITY`/`DBUS_SESSION_BUS_ADDRESS`/`XDG_RUNTIME_DIR`
+   from the user's running desktop process (gnome-shell etc.). Exit codes: 0 running/
+   launched, 3 no graphical session (stop, ask the user to log in and open Chrome),
+   4 launch failed (report). Launch at most once per task. After exit 0, poll
+   `opencli profile list` every 3 s for up to 30 s; if Browser Bridge is still
+   disconnected, prompt the user to click the Browser Bridge extension icon.
+   If a Chrome process already exists but Bridge is disconnected, do not launch a
+   second one — ask the user to reconnect the extension. On Windows, check
+   `tasklist /FI "IMAGENAME eq chrome.exe"` in the user's interactive session and,
+   if absent, `Start-Process chrome -ArgumentList '--restore-last-session'`.
+   Never use Chromium/Playwright launchers, a new/temporary profile or user-data dir,
+   incognito, headless, Xvfb, invented DISPLAY or `--no-sandbox`; never restart or
+   kill Chrome. Resolve login/challenge manually.
 4. Let the command create its owned task tab, perform the action and verify its
    outcome, then close the owned tab/session. This is the default for both posting
    and cloning, including dry-runs, skips and errors. Preserve all pre-existing user

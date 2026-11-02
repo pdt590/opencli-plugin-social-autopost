@@ -1,7 +1,7 @@
 # Graph Report - opencli-plugin-social-autopost  (2026-11-02)
 
 ## Corpus Check
-- 52 files · ~23,323 words
+- 52 files · ~23,332 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 6 file(s) not represented in the graph (top: (none) 4, .example 2)
 
@@ -9,6 +9,11 @@
 - 244 nodes · 563 edges · 16 communities (9 shown, 7 thin omitted)
 - Extraction: 98% EXTRACTED · 2% INFERRED · 0% AMBIGUOUS · INFERRED: 14 edges (avg confidence: 0.86)
 - Token cost: 0 input · 0 output
+
+## Graph Freshness
+- Built from commit: `da991ea8`
+- Run `git rev-parse HEAD` and compare to check if the graph is stale.
+- Run `graphify update .` after code changes (no API cost).
 
 ## Community Hubs (Navigation)
 - validate.js
