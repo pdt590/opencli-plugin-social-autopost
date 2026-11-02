@@ -60,9 +60,9 @@
     "semantic_hash": ""
   },
   "src/images.js": {
-    "mtime": 1792724397.9250624,
-    "seen": 1792724410.1676166,
-    "ast_hash": "82c466761f0492a70525e91c75dc665e",
+    "mtime": 1793588626.1297545,
+    "seen": 1793588722.3570125,
+    "ast_hash": "0e8aab1bd5812b2c7d122a7eeb259775",
     "semantic_hash": ""
   },
   "src/opencli-command.js": {
@@ -174,9 +174,9 @@
     "semantic_hash": ""
   },
   "docs/troubleshooting.md": {
-    "mtime": 1792729742.462837,
-    "seen": 1792729755.783558,
-    "ast_hash": "47100ba953421eb9fd710129bb8c70ac",
+    "mtime": 1793588675.7200315,
+    "seen": 1793588722.3570888,
+    "ast_hash": "0cbf45e81f53c357c6b4538136d30b08",
     "semantic_hash": ""
   },
   "src/personal-profile.js": {
@@ -282,15 +282,15 @@
     "semantic_hash": ""
   },
   "tests/post-group.test.js": {
-    "mtime": 1792729483.189321,
-    "seen": 1792729506.7063777,
-    "ast_hash": "ca83753a188114f43d981bf507a5c776",
+    "mtime": 1793588628.588093,
+    "seen": 1793588722.357048,
+    "ast_hash": "0daef1251e1a3722894dd2fa1f05098b",
     "semantic_hash": ""
   },
   "tests/post-person.test.js": {
-    "mtime": 1792729483.193782,
-    "seen": 1792729506.7063816,
-    "ast_hash": "50b9452670619b42556bcfbb557cadbb",
+    "mtime": 1793588630.6672256,
+    "seen": 1793588722.357052,
+    "ast_hash": "04d2848dbf276d121343dd15156a907b",
     "semantic_hash": ""
   },
   "tests/facebook-reader.test.js": {
@@ -321,6 +321,12 @@
     "mtime": 1792743430.0312133,
     "seen": 1792743485.4029422,
     "ast_hash": "dfb687740e39da1a86f7db7002dea016",
+    "semantic_hash": ""
+  },
+  "tests/images.test.js": {
+    "mtime": 1793588722.6248696,
+    "seen": 1793588759.1610944,
+    "ast_hash": "b7b6997ab39db5fe9a1a4895ecda5b07",
     "semantic_hash": ""
   }
 }

@@ -25,6 +25,7 @@ function page({ target = {}, live = false, images = false, security = {}, finalS
     newTab: vi.fn(async () => 'owned-tab'), selectTab: vi.fn(), closeTab: vi.fn(),
     goto: vi.fn(), insertText: vi.fn(), setFileInput: vi.fn(),
     evaluate: vi.fn(async script => {
+      if (String(script).includes('const selected = Array.from(input?.files')) return { readable: true };
       if (String(script).includes('range.collapse(false)')) return { focused: true };
       return String(script).includes('__opencliPluginArgs') ? args.shift() : plain.shift();
     }),

@@ -7,6 +7,23 @@ import { ACTIVE_DIALOG_HELPERS, evaluateWithArgs, PHOTO_BUTTON_LABELS, poll } fr
 const FILE_INPUT_MARKER = 'data-opencli-social-autopost-file-input';
 const FILE_INPUT_SELECTOR = `input[type="file"][${FILE_INPUT_MARKER}="active"]`;
 
+// CDP can report success even when sandboxed/remote Chrome cannot read the path.
+const READ_ATTACHED_FILES_SCRIPT = `(async () => {
+  const input = document.querySelector(selector);
+  const selected = Array.from(input?.files || []);
+  if (selected.length !== expectedCount) return { readable: false, reason: 'file-count', count: selected.length };
+  try {
+    for (const file of selected) {
+      if (!file.size || !(await file.slice(0, 1).arrayBuffer()).byteLength) {
+        return { readable: false, reason: 'empty-file', count: selected.length };
+      }
+    }
+    return { readable: true, count: selected.length };
+  } catch (error) {
+    return { readable: false, reason: 'file-read-failed', message: String(error.message), count: selected.length };
+  }
+})()`;
+
 const FIND_FILE_INPUT_SCRIPT = `(() => {
   ${ACTIVE_DIALOG_HELPERS}
   const dialog = activeDialog();
@@ -141,16 +158,29 @@ export async function attachImages(
 
   const selector = await ensureFileInput(page, { screenshotDir });
 
+  let useDataTransfer = false;
   try {
     if (typeof page.setFileInput !== 'function') {
       throw new Error('setFileInput is not supported by this Browser Bridge');
     }
     await page.setFileInput(absPaths, selector);
+    const selected = await evaluateWithArgs(page, READ_ATTACHED_FILES_SCRIPT, {
+      selector, expectedCount: absPaths.length,
+    });
+    if (!selected || typeof selected.readable !== 'boolean') {
+      throw new CommandExecutionError('Browser did not return image file readability evidence');
+    }
+    useDataTransfer = !selected.readable;
   } catch (error) {
     if (!isRecoverableFileInputError(error)) {
       const screenshot = await captureScreenshot(page, screenshotDir, 'set-file-input-failed');
-      throw new CommandExecutionError(`Could not attach images with setFileInput. Screenshot: ${screenshot}`);
+      throw new CommandExecutionError(`Could not attach images with setFileInput: ${error.message}. Screenshot: ${screenshot}`);
     }
+    useDataTransfer = true;
+  }
+  if (useDataTransfer) {
+    // Replace the FileList only when the native upload failed or files are unreadable.
+    // A preview timeout alone must not trigger a second attachment.
     await attachImagesViaDataTransfer(page, selector, absPaths);
   }
 
@@ -173,7 +203,7 @@ export async function waitForPreviews(page, expected, { screenshotDir, timeoutMs
   if (!state?.ready) {
     const screenshot = await captureScreenshot(page, screenshotDir, 'image-previews-not-ready');
     throw new CommandExecutionError(
-      `Facebook image previews were not verified (${state?.count || 0}/${expected}). Screenshot: ${screenshot}`,
+      `Facebook image previews were not verified (${state?.count || 0}/${expected}). State: ${JSON.stringify(state)}. Screenshot: ${screenshot}`,
     );
   }
 

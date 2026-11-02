@@ -33,6 +33,7 @@ function makePage({ evaluate = [], evaluateWithArgs = [] } = {}) {
     goto: vi.fn().mockResolvedValue(undefined),
     evaluate: vi.fn(async (script) => {
       const source = String(script);
+      if (source.includes('const selected = Array.from(input?.files')) return { readable: true };
       if (source.includes('__opencliPluginArgs')) {
         argScripts.push(source);
         return evaluateWithArgsQueue.shift();
