@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { CommandExecutionError } from '@jackwener/opencli/errors';
 import { captureScreenshot } from './artifacts.js';
 import { ACTIVE_DIALOG_HELPERS, evaluateWithArgs, PHOTO_BUTTON_LABELS, poll } from './composer.js';
@@ -150,52 +151,79 @@ export async function ensureFileInput(page, { screenshotDir, timeoutMs = 10000, 
 export async function attachImages(
   page,
   absPaths,
-  { screenshotDir, timeoutMs = 30000, intervalMs = 500 } = {},
+  { screenshotDir, timeoutMs = 30000, intervalMs = 500, bridgeTimeoutMs = 15000 } = {},
 ) {
   if (!absPaths.length) {
     return { attached: true, count: 0 };
   }
 
-  const selector = await ensureFileInput(page, { screenshotDir });
+  const selector = await withTimeout(
+    ensureFileInput(page, { screenshotDir, timeoutMs: Math.min(timeoutMs, 10000), intervalMs }),
+    bridgeTimeoutMs,
+    'finding the Facebook image input',
+  );
 
-  let useDataTransfer = false;
+  let base64Error;
   try {
-    if (typeof page.setFileInput !== 'function') {
-      throw new Error('setFileInput is not supported by this Browser Bridge');
-    }
-    await page.setFileInput(absPaths, selector);
-    const selected = await evaluateWithArgs(page, READ_ATTACHED_FILES_SCRIPT, {
-      selector, expectedCount: absPaths.length,
-    });
-    if (!selected || typeof selected.readable !== 'boolean') {
-      throw new CommandExecutionError('Browser did not return image file readability evidence');
-    }
-    useDataTransfer = !selected.readable;
+    await withTimeout(attachImagesViaDataTransfer(page, selector, absPaths), bridgeTimeoutMs, 'transferring image bytes');
   } catch (error) {
-    if (!isRecoverableFileInputError(error)) {
-      const screenshot = await captureScreenshot(page, screenshotDir, 'set-file-input-failed');
-      throw new CommandExecutionError(`Could not attach images with setFileInput: ${error.message}. Screenshot: ${screenshot}`);
-    }
-    useDataTransfer = true;
+    base64Error = error;
   }
-  if (useDataTransfer) {
-    // Replace the FileList only when the native upload failed or files are unreadable.
-    // A preview timeout alone must not trigger a second attachment.
-    await attachImagesViaDataTransfer(page, selector, absPaths);
+
+  if (base64Error) {
+    // A bridge/evaluation error can arrive after the browser accepted the files.
+    // Check the FileList before using the native path so we never attach twice.
+    let selected;
+    let probeError;
+    try {
+      selected = await withTimeout(evaluateWithArgs(page, READ_ATTACHED_FILES_SCRIPT, {
+        selector, expectedCount: absPaths.length,
+      }), bridgeTimeoutMs, 'checking the selected image files');
+    } catch (error) { probeError = error; }
+
+    const confirmedEmpty = selected?.reason === 'file-count' && selected.count === 0;
+    if (!confirmedEmpty) {
+      const screenshot = await captureScreenshot(page, screenshotDir, 'base64-upload-state-unknown');
+      const state = probeError ? `FileList check failed: ${probeError.message}` : `FileList state: ${JSON.stringify(selected)}`;
+      throw new CommandExecutionError(
+        `Base64 image transfer failed (${base64Error.message}); ${state}. Native path fallback was not attempted to avoid duplicate attachments. Screenshot: ${screenshot}`,
+      );
+    }
+
+    {
+      try {
+        if (typeof page.setFileInput !== 'function') {
+          throw new Error('setFileInput is not supported by this Browser Bridge');
+        }
+        await withTimeout(page.setFileInput(absPaths, selector), bridgeTimeoutMs, 'using native image path fallback');
+        selected = await withTimeout(evaluateWithArgs(page, READ_ATTACHED_FILES_SCRIPT, {
+          selector, expectedCount: absPaths.length,
+        }), bridgeTimeoutMs, 'checking native path image files');
+        if (!selected?.readable) {
+          throw new CommandExecutionError('Browser could not read the files selected by setFileInput');
+        }
+      } catch (error) {
+        const screenshot = await captureScreenshot(page, screenshotDir, 'image-upload-failed');
+        throw new CommandExecutionError(
+          `Could not attach images with Base64 transfer (${base64Error.message}) or native path fallback (${error.message}). Screenshot: ${screenshot}`,
+        );
+      }
+    }
   }
 
   const previews = await waitForPreviews(page, absPaths.length, {
     screenshotDir,
-    timeoutMs,
+    timeoutMs: Math.min(timeoutMs, 45000),
     intervalMs,
+    bridgeTimeoutMs,
   });
 
   return { attached: true, count: previews.count };
 }
 
-export async function waitForPreviews(page, expected, { screenshotDir, timeoutMs = 30000, intervalMs = 500 } = {}) {
+export async function waitForPreviews(page, expected, { screenshotDir, timeoutMs = 30000, intervalMs = 500, bridgeTimeoutMs = 15000 } = {}) {
   const state = await poll(
-    () => evaluateWithArgs(page, WAIT_FOR_PREVIEWS_SCRIPT, { expectedCount: expected }),
+    () => withTimeout(evaluateWithArgs(page, WAIT_FOR_PREVIEWS_SCRIPT, { expectedCount: expected }), bridgeTimeoutMs, 'checking Facebook image previews'),
     (result) => result?.ready,
     { timeoutMs, intervalMs },
   );
@@ -210,12 +238,27 @@ export async function waitForPreviews(page, expected, { screenshotDir, timeoutMs
   return state;
 }
 
+function withTimeout(promise, timeoutMs, operation) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`Browser Bridge timed out after ${timeoutMs}ms while ${operation}`)), timeoutMs);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
 export async function attachImagesViaDataTransfer(page, selector, absPaths) {
   const files = absPaths.map((filePath) => ({
     name: path.basename(filePath),
     type: mimeTypeForPath(filePath),
     base64: fs.readFileSync(filePath).toString('base64'),
   }));
+
+  const payloadSize = files.reduce((total, file) => total + file.base64.length, 0);
+  if (payloadSize > 256 * 1024) {
+    return attachLargeImagesViaDataTransfer(page, selector, files);
+  }
 
   const result = await evaluateWithArgs(page, ATTACH_VIA_DATATRANSFER_SCRIPT, {
     selector,
@@ -227,25 +270,84 @@ export async function attachImagesViaDataTransfer(page, selector, absPaths) {
   return result;
 }
 
-export function isRecoverableFileInputError(error) {
-  const message = String(error?.message || error || '').toLowerCase();
-  return (
-    message.includes('unknown action') ||
-    message.includes('not supported') ||
-    message.includes('set-file-input') ||
-    message.includes('not allowed') ||
-    message.includes('not-allowed') ||
-    message.includes('notallowederror') ||
-    message.includes('access denied') ||
-    message.includes('workspace roots') ||
-    message.includes('configured workspace') ||
-    message.includes('file input') ||
-    message.includes('input') ||
-    message.includes('node') ||
-    message.includes('not found') ||
-    message.includes('detached') ||
-    message.includes('dom')
-  );
+async function attachLargeImagesViaDataTransfer(page, selector, files) {
+  const uploadId = randomUUID();
+  const chunksPerCall = 96 * 1024;
+  const initialize = `(() => {
+    window.__opencliSocialUploads ||= Object.create(null);
+    window.__opencliSocialUploads[uploadId] = files.map(file => ({
+      name: file.name, type: file.type, parts: []
+    }));
+    return { initialized: true, count: files.length };
+  })()`;
+  await evaluateWithArgs(page, initialize, {
+    uploadId,
+    files: files.map(({ name, type }) => ({ name, type })),
+  });
+
+  try {
+    for (let fileIndex = 0; fileIndex < files.length; fileIndex += 1) {
+      const base64 = files[fileIndex].base64;
+      for (let offset = 0; offset < base64.length; offset += chunksPerCall) {
+        const append = `(() => {
+          const upload = window.__opencliSocialUploads?.[uploadId];
+          if (!upload?.[fileIndex]) return { appended: false, reason: 'upload-state-not-found' };
+          upload[fileIndex].parts.push(chunk);
+          return { appended: true };
+        })()`;
+        const result = await evaluateWithArgs(page, append, {
+          uploadId,
+          fileIndex,
+          chunk: base64.slice(offset, offset + chunksPerCall),
+        });
+        if (!result?.appended) {
+          throw new CommandExecutionError(`Base64 image chunk transfer failed: ${result?.reason || 'unknown error'}`);
+        }
+      }
+    }
+
+    const finish = `(() => {
+      const upload = window.__opencliSocialUploads?.[uploadId];
+      const input = document.querySelector(selector);
+      if (!upload || !input) return { attached: false, reason: !upload ? 'upload-state-not-found' : 'input-not-found' };
+      try {
+        const transfer = new DataTransfer();
+        for (const item of upload) {
+          const binary = atob(item.parts.join(''));
+          const bytes = new Uint8Array(binary.length);
+          for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+          transfer.items.add(new File([bytes], item.name, { type: item.type }));
+        }
+        let assigned = false;
+        try {
+          Object.defineProperty(input, 'files', { value: transfer.files, writable: false, configurable: true });
+          assigned = input.files && input.files.length >= upload.length;
+        } catch {
+          const descriptor = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'files');
+          if (descriptor?.set) {
+            descriptor.set.call(input, transfer.files);
+            assigned = input.files && input.files.length >= upload.length;
+          }
+        }
+        if (!assigned) return { attached: false, reason: 'could-not-assign-files' };
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        return { attached: true, count: input.files.length };
+      } finally {
+        delete window.__opencliSocialUploads[uploadId];
+      }
+    })()`;
+    const result = await evaluateWithArgs(page, finish, { uploadId, selector });
+    if (!result?.attached) {
+      throw new CommandExecutionError(`Image upload failed (chunked base64): ${result?.reason || 'unknown error'}`);
+    }
+    return result;
+  } catch (error) {
+    try {
+      await evaluateWithArgs(page, `(() => { if (window.__opencliSocialUploads) delete window.__opencliSocialUploads[uploadId]; return true; })()`, { uploadId });
+    } catch { /* Preserve the upload error; the task tab will be closed during cleanup. */ }
+    throw error;
+  }
 }
 
 export function mimeTypeForPath(filePath) {

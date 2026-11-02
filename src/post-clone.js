@@ -192,7 +192,7 @@ export async function readDocument(site, mode) {
       return {url:location.href,text,media,expected_media_count:expected || media.length,album_url:albumToken && originals.size ? `https://www.facebook.com/photo/?fbid=${[...originals.keys()][0]}&set=${albumToken}` : null,has_video:structuredVideo || !!mediaRoot?.querySelector('video'),author:root?.querySelector('[data-ad-rendering-role="profile_name"]')?.innerText || stories.find(s=>s.actors?.[0]?.name)?.actors[0].name || '',published_at:root?.querySelector('time[datetime]')?.dateTime || null,warnings};
     })();
   }
-  const isPost = href => site === 'instagram' ? /\/(p|reel|tv)\/[^/]+/.test(href) : site === 'linkedin' ? /^(?:\/posts\/[^/]+-activity-\d+-[^/]+\/?|\/feed\/update\/urn:li:(?:activity|share|ugcPost):\d+\/?)$/.test(decodeURIComponent(new URL(href).pathname)) : /\/(posts|videos|reel)\/|\/(permalink|story|photo)\.php|[?&]fbid=/.test(href);
+  const isPost = href => site === 'instagram' ? /\/(p|reel|tv)\/[^/]+/.test(href) : site === 'linkedin' ? /^(?:\/posts\/[^/]+-activity-\d+(?:-[^/]+)?\/?|\/feed\/update\/urn:li:(?:activity|share|ugcPost):\d+\/?|\/feed\/update\/urn:li:share:\d+\/?)$/.test(decodeURIComponent(new URL(href).pathname)) : /\/(posts|videos|reel)\/|\/(permalink|story|photo)\.php|[?&]fbid=/.test(href);
   const linkedinCaption=async root=>{
     const selector='.update-components-text, .feed-shared-update-v2__description, [data-testid="expandable-text-box"]';
     const body=()=>root?.querySelector(selector);
@@ -214,14 +214,70 @@ export async function readDocument(site, mode) {
     if (controls().some(el=>/^(?:(?:…|\.{3})\s*)?(?:less|see less|ẩn bớt)$/i.test(label(el)))) text=text.replace(/\s*(?:(?:…|\.{3})\s*)?(?:see less|less|ẩn bớt)$/i,'').trim();
     return {text,warnings:truncated?['LinkedIn caption is still truncated after expanding More.']:[]};
   };
+  const linkedinIdentity=root=>{
+    const scopes=[root];
+    for(let node=root?.parentElement,depth=0;node && depth<3;node=node.parentElement,depth++) {
+      if(node.matches?.('article, [data-urn], .feed-shared-update-v2, .update-components-update-v2')) scopes.push(node);
+    }
+    const nodes=[...new Set(scopes.flatMap(scope=>[scope,...scope.querySelectorAll('[data-urn], [componentkey], [id], a[href]')]))];
+    let key=null,permalink=null;
+    for(const node of nodes) {
+      const values=[node.getAttribute?.('data-urn'),node.getAttribute?.('componentkey'),node.id,node.href,node.getAttribute?.('href')].filter(Boolean);
+      for(const value of values) {
+        const match=value.match(/urn:li:(?:activity|share|ugcPost):(\d+)/) || value.match(/(?:activity|share|ugcPost)[-:](\d{8,})/);
+        if(!match) continue;
+        const urn=value.match(/urn:li:(?:activity|share|ugcPost):\d+/)?.[0] || `urn:li:activity:${match[1]}`;
+        key ||= urn;
+      }
+      const href=node.href || node.getAttribute?.('href');
+      if(!permalink && href) {try {if(isPost(href)) permalink=new URL(href,location.href).href;} catch { /* Ignore malformed hrefs. */ }}
+      key ||= node.getAttribute?.('componentkey') || node.getAttribute?.('data-urn') || null;
+    }
+    return {post_key:key,permalink};
+  };
+  const linkedinPublishedAt=root=>{
+    const exact=root?.querySelector('time[datetime]')?.dateTime;
+    if(exact && !Number.isNaN(Date.parse(exact))) return {value:new Date(exact).toISOString(),inferred:false};
+    const activityId=linkedinIdentity(root).post_key?.match(/^urn:li:activity:(\d+)$/)?.[1];
+    if(activityId) {
+      try {
+        // LinkedIn activity IDs observed in current feeds encode epoch milliseconds above 22 low bits.
+        const milliseconds=BigInt(activityId)>>22n;
+        const date=new Date(Number(milliseconds));
+        if(Number.isFinite(date.getTime()) && date.getUTCFullYear()>=2010 && date.getTime()<=Date.now()+86400000) {
+          return {value:date.toISOString(),inferred:false,source:'activity_urn'};
+        }
+      } catch { /* Fall through to the visible relative age label. */ }
+    }
+    const nodes=[...(root?.querySelectorAll('[aria-label], [title], time, .update-components-actor__sub-description') || [])];
+    for(const node of nodes) {
+      const label=[node.getAttribute?.('aria-label'),node.getAttribute?.('title'),node.innerText,node.textContent].filter(Boolean).join(' ').trim();
+      const match=label.match(/\b(\d+)\s*(s|sec|m|min|h|hr|d|w|wk|mo|y)\b/i);
+      if(!match) continue;
+      const amount=Number(match[1]),unit=match[2].toLowerCase();
+      const milliseconds=({s:1000,sec:1000,m:60000,min:60000,h:3600000,hr:3600000,d:86400000,w:604800000,wk:604800000,mo:2592000000,y:31536000000})[unit];
+      if(milliseconds) return {value:new Date(Date.now()-amount*milliseconds).toISOString(),inferred:true,source:'relative_age'};
+    }
+    return {value:null,inferred:false};
+  };
+  const linkedinMedia=root=>[...(root?.querySelectorAll('img') || [])].filter(img=>{
+    const source=img.currentSrc || img.src || img.getAttribute('data-delayed-url') || img.getAttribute('data-src') || '';
+    const identity=`${source} ${img.className || ''} ${img.alt || ''}`;
+    const blocked=/company-logo|profile-displayphoto|profile[-_ ]?picture|logo|avatar/i.test(identity);
+    const declared=Number(img.getAttribute('width'))>200 || Number(img.getAttribute('height'))>200;
+    return !blocked && (img.naturalWidth>200 && img.naturalHeight>150 || declared || /media\.licdn\.com\/dms\/image\//i.test(source));
+  }).map(img=>({type:'image',url:img.currentSrc || img.src || img.getAttribute('data-delayed-url') || img.getAttribute('data-src')})).filter(item=>item.url);
   if(site==='linkedin' && mode==='cards') {
-    return (await Promise.all([...document.querySelectorAll('h2')].filter(h=>h.textContent.trim()==='Feed post').map(async h=>{
-      const root=h.closest('[componentkey]');
-      if(!root) return null;
-      const permalink=[...root.querySelectorAll('a[href]')].map(a=>a.href).find(isPost);
-      const media=[...root.querySelectorAll('img')].filter(img=>img.naturalWidth>200 && img.naturalHeight>150 && !/company-logo|profile-displayphoto/.test(img.src)).map(img=>({type:'image',url:img.currentSrc || img.src}));
+    const headings=[...document.querySelectorAll('h2')].filter(h=>/^feed post$/i.test(h.textContent.trim()));
+    const cardRoots=[...new Set(headings.map(h=>h.closest('[componentkey]') || h.closest('.feed-shared-update-v2, .update-components-update-v2')).filter(Boolean))];
+    if(!cardRoots.length) cardRoots.push(...document.querySelectorAll('.feed-shared-update-v2, .update-components-update-v2, [data-urn^="urn:li:activity:"], [data-urn^="urn:share:"]'));
+    return (await Promise.all(cardRoots.map(async root=>{
+      const identity=linkedinIdentity(root);
+      const permalink=[...root.querySelectorAll('a[href]')].map(a=>a.href).find(isPost) || identity.permalink;
+      const media=linkedinMedia(root);
       const caption=await linkedinCaption(root);
-      return {url:permalink || location.href,permalink:permalink || null,post_key:root.getAttribute('componentkey'),text:caption.text,has_video:!!root.querySelector('video,[data-vjs-player]'),media,published_at:root.querySelector('time[datetime]')?.dateTime || null,warnings:[...caption.warnings,...(permalink?[]:['Post extracted from an individual feed card; LinkedIn did not expose its permalink. Source URL points to the company feed.'])]};
+      const published=linkedinPublishedAt(root);
+      return {url:permalink || location.href,permalink:permalink || null,post_key:identity.post_key || root.getAttribute('componentkey'),text:caption.text,has_video:!!root.querySelector('video,[data-vjs-player]'),media,published_at:published.value,timestamp_source:published.source || 'dom',warnings:[...caption.warnings,...(published.source==='activity_urn'?['LinkedIn timestamp decoded from its numeric activity URN.']:published.inferred?['LinkedIn timestamp was estimated from its relative age label.']:[]),...(permalink?[]:['Post extracted from an individual feed card; LinkedIn did not expose its permalink. Source URL points to the company feed.'])]};
     }))).filter(Boolean);
   }
   if (mode === 'links') return [...new Set([...document.querySelectorAll('a[href]')].map(a=>a.href).filter(href=>{try {const url=new URL(href); return (url.hostname===site+'.com' || url.hostname.endsWith('.'+site+'.com')) && !/\/(reels?|videos?|watch|tv)(\/|$)/i.test(url.pathname) && isPost(href);} catch {return false;}}))];
@@ -234,7 +290,7 @@ export async function readDocument(site, mode) {
   const text = caption?.text || body?.innerText || meta('og:description');
   const media=[];
   const add=(url,type)=>{if(url && !media.some(m=>m.url===url)) media.push({url,type});};
-  for(const img of root?.querySelectorAll('img') || []) if(img.naturalWidth > 200 && img.naturalHeight > 150) add(img.currentSrc || img.src,'image');
+  for(const item of site==='linkedin' ? linkedinMedia(root) : [...(root?.querySelectorAll('img') || [])].filter(img=>img.naturalWidth>200 && img.naturalHeight>150).map(img=>({type:'image',url:img.currentSrc || img.src}))) add(item.url,item.type);
   for(const video of root?.querySelectorAll('video') || []) add(video.currentSrc || video.querySelector('source')?.src || video.src,'video');
   if(!media.length) add(meta('og:image'),'image');
   add(meta('og:video') || meta('og:video:url'),'video');

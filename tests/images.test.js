@@ -36,30 +36,31 @@ function browser(files, ready = true) {
   return { page, transfers };
 }
 
-describe('Chrome filesystem image upload recovery', () => {
+describe('Base64-first image upload', () => {
   it.each([
     ['empty FileList', []],
     ['zero-byte file', [{ size: 0 }]],
     ['unreadable file', [{ size: 4, slice: () => ({ arrayBuffer: async () => { throw new Error('NotReadableError'); } }) }]],
-  ])('transfers local bytes after native success with %s', async (_name, files) => {
+  ])('transfers local bytes first with %s in the browser FileList', async (_name, files) => {
     const { page, transfers } = browser(files);
     await expect(attachImages(page, [imagePath], { screenshotDir: dir })).resolves.toEqual({ attached: true, count: 1 });
-    expect(page.setFileInput).toHaveBeenCalledTimes(1);
+    expect(page.setFileInput).not.toHaveBeenCalled();
     expect(transfers).toHaveLength(1);
     expect(transfers[0][0]).toEqual({ name: 'ảnh test.png', type: 'image/png', base64: fs.readFileSync(imagePath).toString('base64') });
   });
 
-  it('keeps native upload when Chrome can read the bytes', async () => {
+  it('uses Base64 transfer before trying a readable native path', async () => {
     const { page, transfers } = browser([new File([fs.readFileSync(imagePath)], 'image.png')]);
     await attachImages(page, [imagePath], { screenshotDir: dir });
-    expect(transfers).toHaveLength(0);
+    expect(transfers).toHaveLength(1);
+    expect(page.setFileInput).not.toHaveBeenCalled();
   });
 
-  it('does not attach again on preview timeout for readable files', async () => {
+  it('does not retry with a native path on preview timeout', async () => {
     const { page, transfers } = browser([new File(['image'], 'image.png')], false);
     await expect(attachImages(page, [imagePath], { screenshotDir: dir, timeoutMs: 0, intervalMs: 0 }))
       .rejects.toThrow(/State:.*hasProgress/);
-    expect(transfers).toHaveLength(0);
-    expect(page.setFileInput).toHaveBeenCalledTimes(1);
+    expect(transfers).toHaveLength(1);
+    expect(page.setFileInput).not.toHaveBeenCalled();
   });
 });

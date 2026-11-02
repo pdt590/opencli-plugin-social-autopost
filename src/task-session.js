@@ -1,18 +1,16 @@
 // Shared lifecycle for post-person, post-group and all post-clone commands.
 // Browser Bridge owns the session; this never launches or terminates Chrome.
 export async function closeTaskSession(page, ownedTab) {
-  if (typeof page?.closeWindow !== 'function') {
-    if (ownedTab) await page.closeTab(ownedTab);
-    return;
+  if (!ownedTab) return;
+  if (typeof page?.closeTab !== 'function') {
+    throw new Error('Browser Bridge does not support closing the owned task tab');
   }
-  const previous = process.env.OPENCLI_CLOSE_OWNED_TAB;
-  process.env.OPENCLI_CLOSE_OWNED_TAB = '1';
-  try {
-    await page.closeWindow();
-    // OpenCLI also releases the lease after the adapter returns; release only once.
-    page.closeWindow = async () => {};
-  } finally {
-    if (previous === undefined) delete process.env.OPENCLI_CLOSE_OWNED_TAB;
-    else process.env.OPENCLI_CLOSE_OWNED_TAB = previous;
-  }
+
+  // Close the exact tab created by this command. closeWindow() routes through a
+  // session-wide owned-tab cleanup call that can hang after an adapter succeeds.
+  await page.closeTab(ownedTab);
+
+  // OpenCLI's outer lifecycle normally calls closeWindow() after the command.
+  // The owned task tab is already closed, so suppress a second Bridge request.
+  if (typeof page.closeWindow === 'function') page.closeWindow = async () => {};
 }

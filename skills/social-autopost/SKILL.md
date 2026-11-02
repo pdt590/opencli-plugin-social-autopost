@@ -91,15 +91,45 @@ to fill a short result. Latest means latest among discovered accessible posts; r
 pinned posts, missing timestamps and bounded scrolling can affect order.
 
 Each selected post has its own folder containing `post.md`, `metadata.json` and images.
-Repeated runs do not overwrite earlier folders. Inspect `warnings`, `errors`, actual
-nonempty image files and every row: a successful envelope can contain `partial`,
-`skipped` or `failed` results. Report requested/saved counts and output paths. A local
-network restriction or failed media download is not the same as a post with no media.
-Do not claim complete text, carousel images, chronology or history without evidence.
+Repeated runs do not overwrite earlier folders. For a clone-only request, use the
+returned post text, metadata and image paths directly; do not inspect the user's posting
+history, compare semantic duplicates, run editorial QA, or perform a second review pass.
+Report the returned results and output paths. Keep adapter-reported warnings/errors and
+do not claim unavailable text or images were retrieved. Stop after the requested clone;
+do not enter the Facebook publishing workflow unless publishing was also requested.
+
+### Scheduled cron source selection and duplicate handling
+
+For each scheduled cron run that clones a post for publication:
+
+1. Choose exactly one URL at random from the cron's configured source URL list before
+   cloning. Record it as that run's `selected_source_url` and keep it locked for the
+   whole run. Never switch to another source URL because a candidate is duplicate,
+   inaccessible, or unsuitable.
+2. Clone candidates from that selected URL and consider image posts newest to oldest,
+   using their stable post identity and timestamp. For each candidate, check the cron's
+   publication history for a duplicate before using it.
+3. If a candidate is duplicate, skip it and continue to the next older candidate from
+   the same selected source URL. Repeat until the first nonduplicate, eligible image post
+   is found; use that post for the run.
+4. If the selected source has no more accessible older candidates, stop that run and
+   report that no eligible post was found. Do not draw another source URL in the same
+   run. A later scheduled run makes a new random source selection.
+
+This source lock and duplicate scan apply to scheduled clone-and-publish runs only.
+They do not change the clone-only workflow above.
 
 LinkedIn company `/posts/` and `feedView` links are feeds. When permalinks are hidden,
-clone extracts individual cards, records `post_key`, `permalink: null` and a source-feed
-warning. Never invent permalinks or treat all company-page images as one post.
+clone extracts individual cards and stores the stable activity URN as `post_key`; use the
+feed URL internally if LinkedIn does not expose a real permalink. The feed URL scopes the
+source; it is not a post identity and must never cause every card from that feed to be
+marked duplicate. Deduplicate with the post's permalink or `post_key`, then compare text
+and image hashes across sources. Record card identity from LinkedIn's component/URN data
+and prefer an explicit DOM timestamp, then the timestamp encoded in a numeric activity
+URN. Store provenance in `timestamp_source`. A relative age label is the last fallback and
+must be marked as an estimate. If stable identity or time is unavailable, keep the field
+null so automation can reject the candidate safely. Never invent an ID or permalink or
+treat all company-page images as one post.
 
 ## Publish Facebook posts
 
@@ -119,6 +149,29 @@ Always use `--slow true --timeout 600` for posting, including requested dry-runs
 Allow sufficient tool runtime and poll ongoing processes. Never disable slow typing
 to fit a tool deadline; slow input does not guarantee avoidance of bot detection.
 
+For a live post, keep the owned task tab open through submission and outcome polling:
+
+1. Attach the requested image(s), verify their previews, and verify the exact caption.
+2. Click Post once and wait for the adapter's outcome check.
+3. Read the adapter's outcome and evidence, then close the owned task tab. Do not take
+   a screenshot after clicking Post.
+
+If the outcome remains `unknown`, report the result as unverified and do not retry the
+post. On a post-submit error, do not take a screenshot; close the owned task tab during
+cleanup. Screenshots for pre-submit diagnostics remain allowed.
+
+Image upload uses Base64 through browser `DataTransfer` as the primary path. The local
+OpenCLI adapter reads the supplied image bytes and transfers them into the page. It
+uses native `setFileInput` paths only when Base64 transfer fails and the browser
+confirms no files were attached. If transfer status remains ambiguous, it stops instead
+of risking duplicates. A preview timeout does not trigger another upload. If a browser `upload_file`
+tool reports `Access denied` or `not within any of the configured workspace roots`, do not
+retry that path or copy the attachment elsewhere. Use/update this checkout's plugin with
+`node scripts/install-plugin.js`, then publish through `opencli facebook post-person` or
+`opencli facebook post-group` as appropriate. Verify the image preview
+before publishing and verify the post outcome afterward; upload success alone is not
+proof that the post was published.
+
 ```sh
 opencli facebook post-person --caption-file caption.txt --images "photo1.jpg,photo2.png" --slow true --timeout 600 --confirm true
 opencli facebook post-group --group-url "https://www.facebook.com/groups/<id>" --caption-file caption.txt --slow true --timeout 600 --confirm true
@@ -134,13 +187,14 @@ accounts. Do not reuse a completed request as permission to publish again.
 
 Read the result before reporting success: `posted` requires fresh success evidence
 and a closed composer, or a newly verified feed post with exact caption, recent time
-and a new permalink. `evidence: feed-post`/`post_url` is valid verification.
+and a new permalink.
+`evidence: feed-post`/`post_url` is valid verification.
 `pending-review` is awaiting approval, `failed` is an observed error and `unknown` is
 unverified. Never automatically repeat a failed/unknown live attempt. Default cleanup
 runs after this verification; report remaining uncertainty even if the tab is closed.
 
-Dry-run returns `screenshot: null`; technical screenshots can be saved after live
-submission or errors. Do not turn those into a preview approval gate. On timeout,
+Dry-run and live post results return `screenshot: null`. Do not take screenshots after
+live submission or turn screenshots into a preview approval gate. On timeout,
 inspect `progress-<task_tab>.json`: `insert-caption`/`attach-images` is preparation,
 while `submit-attempt` or later means submission may have started. Wait for the
 running adapter to finish before acting on the composer.

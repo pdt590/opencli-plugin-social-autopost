@@ -120,6 +120,22 @@ it('validates platform URLs, post kinds and positive limits', () => {
   for (const url of ['https://facebook.com.evil.test/a', 'file:///tmp/x', 'https://x:pw@facebook.com/a']) expect(() => parseSource('facebook', url, 1)).toThrow();
   for (const limit of [0, -1, 1.5, 'oops']) expect(() => parseSource('facebook', 'https://facebook.com/a', limit)).toThrow();
 });
+
+it('accepts LinkedIn URN permalinks and legacy feed card wrappers', async()=>{
+  expect(parseSource('linkedin','https://www.linkedin.com/feed/update/urn:li:activity:1234567890/').kind).toBe('post');
+  const {readDocument}=await import('../src/post-clone.js');
+  const originalDocument=globalThis.document,originalLocation=globalThis.location;
+  const anchor={href:'https://www.linkedin.com/feed/update/urn:li:activity:1234567890/',getAttribute:()=>null};
+  const root={querySelectorAll:()=>[anchor],querySelector:()=>null,getAttribute:()=> 'activity:1234567890'};
+  const heading={textContent:'Feed post',closest:()=>root};
+  globalThis.location={href:'https://www.linkedin.com/company/a/posts/',pathname:'/company/a/posts/'};
+  globalThis.document={querySelectorAll:selector=>selector==='h2'?[heading]:[],querySelector:()=>null};
+  try {
+    const cards=await readDocument('linkedin','cards');
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toMatchObject({url:anchor.href,permalink:anchor.href,post_key:'activity:1234567890'});
+  } finally {if(originalDocument===undefined) delete globalThis.document;else globalThis.document=originalDocument;if(originalLocation===undefined) delete globalThis.location;else globalThis.location=originalLocation;}
+});
 it('writes local artifacts and reports failed media without claiming completion', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clone-'));
   try {

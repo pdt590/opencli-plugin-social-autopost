@@ -53,7 +53,7 @@ export async function runPost(first, second, { resolveInput, verifyTarget, comma
   } catch (error) {
     failure = error;
     failure.message += ` Stage: ${stage}.${progressFile ? ` Progress: ${progressFile}.` : ''}`;
-    if (ownedTab) {
+    if (ownedTab && !['submit-attempt', 'verify-outcome', 'complete'].includes(stage)) {
       try {
         const screenshot = await captureScreenshot(page, input.screenshotDir, 'task-error');
         failure.message += ` Screenshot: ${screenshot}`;
@@ -155,7 +155,6 @@ async function preparePost(page, input, timing, verifyTarget, resultTarget, repo
     timeoutMs: timing.postOutcomeTimeoutMs,
     intervalMs: timing.postOutcomeIntervalMs,
   });
-  const screenshot = await captureScreenshot(page, input.screenshotDir, 'post');
   reportProgress('complete');
 
   return [
@@ -168,7 +167,7 @@ async function preparePost(page, input, timing, verifyTarget, resultTarget, repo
       postUrl: outcome.post_url,
       captionLength: input.caption.length,
       imageCount: input.images.length,
-      screenshot,
+      screenshot: null,
     }),
   ];
 }
