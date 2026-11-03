@@ -68,7 +68,7 @@ const CLICK_PHOTO_BUTTON_SCRIPT = `(() => {
   return { clicked: false, reason: 'photo-button-not-found' };
 })()`;
 
-const WAIT_FOR_PREVIEWS_SCRIPT = `(() => {
+export const WAIT_FOR_PREVIEWS_SCRIPT = `(() => {
   ${ACTIVE_DIALOG_HELPERS}
   const dialog = activeDialog();
   if (!dialog) return { ready: false, reason: 'dialog-not-found', count: 0 };
@@ -83,8 +83,15 @@ const WAIT_FOR_PREVIEWS_SCRIPT = `(() => {
     const label = String(el.getAttribute('aria-label') || el.textContent || '').toLowerCase();
     return label.includes('remove photo') || label.includes('remove image') || label.includes('移除照片') || label.includes('删除照片');
   }).length;
+  // Facebook shows at most five tiles and folds the rest into a "+N" overlay.
+  const overflow = Array.from(dialog.querySelectorAll('div, span'))
+    .filter((el) => el.childElementCount === 0 && !el.closest('[contenteditable="true"]') && visible(el))
+    .map((el) => String(el.textContent || '').trim().match(/^\\+\\s?(\\d{1,2})$/))
+    .filter(Boolean)
+    .map((match) => Number(match[1]));
+  const hidden = imageUrls.size && overflow.length ? Math.max(...overflow) : 0;
   const progress = dialog.querySelector('[role="progressbar"], [aria-busy="true"]');
-  const count = Math.max(imageUrls.size, removeButtons);
+  const count = Math.max(imageUrls.size + hidden, removeButtons);
   return { ready: count >= expectedCount && !progress, count, hasProgress: Boolean(progress) };
 })()`;
 

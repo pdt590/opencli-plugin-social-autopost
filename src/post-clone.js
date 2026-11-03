@@ -280,7 +280,8 @@ export async function readDocument(site, mode) {
       return {url:permalink || location.href,permalink:permalink || null,post_key:identity.post_key || root.getAttribute('componentkey'),text:caption.text,has_video:!!root.querySelector('video,[data-vjs-player]'),media,published_at:published.value,timestamp_source:published.source || 'dom',warnings:[...caption.warnings,...(published.source==='activity_urn'?['LinkedIn timestamp decoded from its numeric activity URN.']:published.inferred?['LinkedIn timestamp was estimated from its relative age label.']:[]),...(permalink?[]:['Post extracted from an individual feed card; LinkedIn did not expose its permalink. Source URL points to the company feed.'])]};
     }))).filter(Boolean);
   }
-  if (mode === 'links') return [...new Set([...document.querySelectorAll('a[href]')].map(a=>a.href).filter(href=>{try {const url=new URL(href); return (url.hostname===site+'.com' || url.hostname.endsWith('.'+site+'.com')) && !/\/(reels?|videos?|watch|tv)(\/|$)/i.test(url.pathname) && isPost(href);} catch {return false;}}))];
+  // Video links are kept so the caller can keep scrolling past them and report them as skipped.
+  if (mode === 'links') return [...new Set([...document.querySelectorAll('a[href]')].map(a=>a.href).filter(href=>{try {const url=new URL(href); return (url.hostname===site+'.com' || url.hostname.endsWith('.'+site+'.com')) && isPost(href);} catch {return false;}}))];
   const roots = site === 'linkedin' ? '.feed-shared-update-v2, .update-components-update-v2' : site === 'instagram' ? 'article' : '[role="article"]';
   const root = document.querySelector(roots) || (site==='linkedin' ? [...document.querySelectorAll('h2')].find(h=>h.textContent.trim()==='Feed post')?.closest('[componentkey]') : document.querySelector('main') || document.querySelector('[role="main"]'));
   if(site==='linkedin' && mode==='post' && !root) throw new Error('No individual LinkedIn post card found; refusing to extract the whole page');
@@ -389,6 +390,14 @@ function skippedPost(post, reason='no-media') {
   return {status:'skipped',url:post.url,reason,media_count:0};
 }
 
+const SCROLL_FOR_MORE=`(() => {
+  const height=document.body.scrollHeight;
+  const more=[...document.querySelectorAll('button')].find(b=>b.offsetParent!==null && /^(show more results|see more posts|load more|xem thêm kết quả)$/i.test(b.innerText.trim()));
+  if (more) more.click();
+  window.scrollTo(0, document.body.scrollHeight);
+  return height;
+})()`;
+
 export async function postClone(site, first, second) {
   const {page,kwargs}=normalizeInvocation(first,second);
   const source=parseSource(site,kwargs.url,kwargs.limit ?? 1);
@@ -415,23 +424,31 @@ export async function postClone(site, first, second) {
     const evaluate=async mode=>unwrap(await page.evaluate(`(${readDocument.toString()})(${JSON.stringify(site)},${JSON.stringify(mode)})`));
     const urls=new Set(source.kind==='post'?[source.url]:[]);
     const feedPosts=new Map();
+    const videoUrls=new Set();
     if(source.kind==='feed') {
       let stale=0;
-      for(let round=0;round<30 && stale<3;round++) {
-        const before=urls.size;
+      const found=()=>urls.size+videoUrls.size+feedPosts.size;
+      // Allow a slow first render more empty rounds before giving up.
+      for(let round=0;round<30 && stale<(found()?3:8);round++) {
+        const before=found();
         if(site==='linkedin') {
           for(const post of await evaluate('cards')) feedPosts.set(post.post_key,post);
           if([...feedPosts.values()].filter(post=>!skipReason(post)).length>=source.limit) break;
         }
-        for(const url of await evaluate('links')) {try {const parsed=parseSource(site,url); if(parsed.kind==='post') urls.add(parsed.url);} catch { /* Ignore unrelated links. */ }}
+        for(const url of await evaluate('links')) {try {const parsed=parseSource(site,url); if(parsed.kind==='post') (isVideoUrl(parsed.url)?videoUrls:urls).add(parsed.url);} catch { /* Ignore unrelated links. */ }}
         if(urls.size>=source.limit*3) break;
-        stale=before===urls.size?stale+1:0;
-        await page.evaluate('window.scrollTo(0, document.body.scrollHeight)');
-        await new Promise(resolve=>setTimeout(resolve,1000));
+        stale=before===found()?stale+1:0;
+        // Lazy feeds (LinkedIn) need ~3s per batch and may show a "Show more results" button.
+        const height=Number(unwrap(await page.evaluate(SCROLL_FOR_MORE)));
+        for(let wait=0;wait<5;wait++) {
+          await new Promise(resolve=>setTimeout(resolve,1000));
+          const grown=Number(unwrap(await page.evaluate('document.body.scrollHeight')));
+          if(!(height>0) || !(grown>0) || grown>height) break;
+        }
       }
     }
-    if(!urls.size && !feedPosts.size) throw new CommandExecutionError('No post links found. Verify login, source visibility and page layout.');
-    const posts=[],failures=[],skipped=[];
+    if(!urls.size && !feedPosts.size && !videoUrls.size) throw new CommandExecutionError('No post links found. Verify login, source visibility and page layout.');
+    const posts=[],failures=[],skipped=[...videoUrls].slice(0,source.limit*3).map(url=>skippedPost({url},'video-post'));
     for(const post of feedPosts.values()) {
       if (posts.length>=source.limit) break;
       const reason=skipReason(post);
@@ -475,7 +492,7 @@ export async function postClone(site, first, second) {
       rows.push(await savePost(post,output,site));
     }
     if (!rows.length && !skipped.length) throw new CommandExecutionError(failures.map(row=>`${row.url}: ${row.error}`).join('; ') || 'No posts downloaded');
-    return [...rows,...skipped,...failures, ...(source.kind==='feed' && rows.length<source.limit ? [{status:'partial',requested:source.limit,downloaded:rows.length,warning:'Fewer accessible posts with media than requested'}]:[])];
+    return [...rows,...skipped,...failures, ...(source.kind==='feed' && rows.length<source.limit ? [{status:'partial',requested:source.limit,downloaded:rows.length,warning:'Fewer accessible posts with media than requested',...(videoUrls.size?{video_posts_skipped:videoUrls.size}:{})}]:[])];
   } catch(error) { failure=error; throw error; }
   finally {
     const errors=[];

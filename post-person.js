@@ -9,6 +9,8 @@ export async function postPerson(first, second) {
     resolveInput: resolvePersonInputs,
     verifyTarget: verifyPersonalProfileLoaded,
     resultTarget: 'profileUrl',
+    // /me redirects to the profile timeline, which lists the newest posts first.
+    reconcileUrl: input => input.targetUrl,
   });
 }
 

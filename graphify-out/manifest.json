@@ -54,15 +54,15 @@
     "semantic_hash": ""
   },
   "src/composer.js": {
-    "mtime": 1793589395.3502328,
-    "seen": 1793592014.619953,
-    "ast_hash": "4f92629dd691b99140f37fcd6fb01dbc",
+    "mtime": 1793682012.8408046,
+    "seen": 1793682077.0833938,
+    "ast_hash": "3870621137fe88ad98242ee18caa78ed",
     "semantic_hash": ""
   },
   "src/images.js": {
-    "mtime": 1793608837.4424984,
-    "seen": 1793608849.6765664,
-    "ast_hash": "065d1397e050a6f5c692f72aa11c23d5",
+    "mtime": 1793671339.4940577,
+    "seen": 1793671398.9069114,
+    "ast_hash": "9e5edf2574cb5a46af364b4a22db8624",
     "semantic_hash": ""
   },
   "src/opencli-command.js": {
@@ -186,9 +186,9 @@
     "semantic_hash": ""
   },
   "src/post-flow.js": {
-    "mtime": 1793611669.5996554,
-    "seen": 1793611676.479769,
-    "ast_hash": "6568b750a7a0da048b1cc162c38ad945",
+    "mtime": 1793670689.2476704,
+    "seen": 1793670711.7261012,
+    "ast_hash": "f4a00c254637583ab900ed127d9b92b3",
     "semantic_hash": ""
   },
   "tests/vitest.config.js": {
@@ -198,15 +198,15 @@
     "semantic_hash": ""
   },
   "tests/slow-post.test.js": {
-    "mtime": 1793589395.3542328,
-    "seen": 1793592014.620012,
-    "ast_hash": "42c376d2ad853de8546e1d8803c03781",
+    "mtime": 1793675786.2278383,
+    "seen": 1793675825.2657673,
+    "ast_hash": "fa3293ebf58a0c60c04512ce3b09caef",
     "semantic_hash": ""
   },
   "tests/post-outcome.test.js": {
-    "mtime": 1793589395.3502328,
-    "seen": 1793592014.6200004,
-    "ast_hash": "4ebca08b614d4ee77546db71eb7a5a8a",
+    "mtime": 1793682012.8448048,
+    "seen": 1793682077.08346,
+    "ast_hash": "7a9ebc707cfffcce3a58e05790bcc164",
     "semantic_hash": ""
   },
   "post-tabs.js": {
@@ -240,9 +240,9 @@
     "semantic_hash": ""
   },
   "skills/social-autopost/SKILL.md": {
-    "mtime": 1793611649.1188989,
-    "seen": 1793611657.6189427,
-    "ast_hash": "5f99317c3b4ab47598ba1ea037eb1fa4",
+    "mtime": 1793679094.6887224,
+    "seen": 1793679109.6962118,
+    "ast_hash": "d2f03c10df1acd780b995df0ec6cde01",
     "semantic_hash": ""
   },
   "src/task-session.js": {
@@ -258,27 +258,27 @@
     "semantic_hash": ""
   },
   "post-group.js": {
-    "mtime": 1793589395.3502328,
-    "seen": 1793592014.6199224,
-    "ast_hash": "3a89b123b18dd6468c2d475565a7ba26",
+    "mtime": 1793670689.2476704,
+    "seen": 1793670711.726047,
+    "ast_hash": "22fb3d35c63b91f6d4ac0ef13248513f",
     "semantic_hash": ""
   },
   "post-person.js": {
-    "mtime": 1793589395.3502328,
-    "seen": 1793592014.6199253,
-    "ast_hash": "30188911adecba6ce9aca783c44a85e5",
+    "mtime": 1793679001.1777925,
+    "seen": 1793679109.6960487,
+    "ast_hash": "4f5947d96a25b116b08d3fc22c9befa1",
     "semantic_hash": ""
   },
   "src/post-clone.js": {
-    "mtime": 1793606661.1368265,
-    "seen": 1793606670.9408686,
-    "ast_hash": "8483287c2599c197ec61f16405607f77",
+    "mtime": 1793679929.9125142,
+    "seen": 1793680078.2082515,
+    "ast_hash": "46e2aaa8ffc557d692f4d2c92bf22a6d",
     "semantic_hash": ""
   },
   "tests/post-clone.test.js": {
-    "mtime": 1793603795.5923471,
-    "seen": 1793603831.9459882,
-    "ast_hash": "4221c426b73aa80ede95e2def2e5e92b",
+    "mtime": 1793679975.6940825,
+    "seen": 1793680078.2082884,
+    "ast_hash": "835c976c4de092282f96bbf348704a48",
     "semantic_hash": ""
   },
   "tests/post-group.test.js": {
@@ -336,9 +336,39 @@
     "semantic_hash": ""
   },
   "skills/social-autopost/scripts/ensure-chrome.sh": {
-    "mtime": 1793601654.4932687,
-    "seen": 1793602499.703041,
-    "ast_hash": "8e6a2c404107e29003af7576b296741e",
+    "mtime": 1793678861.6495476,
+    "seen": 1793679109.6960838,
+    "ast_hash": "f84abe2bc325f81c1744be7b2f661edf",
+    "semantic_hash": ""
+  },
+  "tests/image-previews.test.js": {
+    "mtime": 1793671348.8263843,
+    "seen": 1793671398.906951,
+    "ast_hash": "4459abbb1c87141d9496d16792434503",
+    "semantic_hash": ""
+  },
+  "skills/social-autopost/scripts/close-chrome.sh": {
+    "mtime": 1793678861.6495476,
+    "seen": 1793679109.6960807,
+    "ast_hash": "02a7d20cc3d7fb034fe23b45f1088892",
+    "semantic_hash": ""
+  },
+  "skills/social-autopost/scripts/prune-runs.py": {
+    "mtime": 1793674460.8258574,
+    "seen": 1793675825.2656896,
+    "ast_hash": "4d659cac7cd6effe6a312bf07078b37b",
+    "semantic_hash": ""
+  },
+  "skills/social-autopost/scripts/publication-lock.py": {
+    "mtime": 1793674386.8194993,
+    "seen": 1793675825.2656925,
+    "ast_hash": "891ac4f37450a8f71df8e3b1e85b75b0",
+    "semantic_hash": ""
+  },
+  "skills/social-autopost/scripts/chrome-windows.py": {
+    "mtime": 1793678846.893109,
+    "seen": 1793679109.6960773,
+    "ast_hash": "537ae25114ab7a4ccab30179ca33179e",
     "semantic_hash": ""
   }
 }

@@ -32,6 +32,18 @@ it('types separate Unicode-safe chunks with pauses and verifies the full caption
   expect(chunks.some(s => s.includes('👨‍👩‍👧‍👦'))).toBe(true);
 });
 
+it('never ends a paced chunk on a line break', async () => {
+  const page = browser();
+  // Twelve graphemes end exactly on the first break, mirroring a caption that lost "\n4️⃣".
+  const caption = 'hiệu cảnh.\n\n4️⃣ Churn Radar phát hiện sớm khách hàng có nguy cơ.\n5️⃣ Pipeline';
+  const pending = insertCaption(page, caption, { screenshotDir: dir, slow: true });
+  await vi.runAllTimersAsync();
+  await expect(pending).resolves.toMatchObject({ method: 'paced-insertText' });
+  const chunks = page.insertText.mock.calls.map(([s]) => s);
+  expect(chunks.join('')).toBe(caption);
+  expect(chunks.slice(0, -1).every(s => !s.endsWith('\n'))).toBe(true);
+});
+
 it('stops after a partial insert failure without appending fallback text or retrying', async () => {
   const page = browser();
   page.insertText.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('bridge interrupted'));

@@ -33,6 +33,36 @@ it('stops processing LinkedIn feed cards after enough eligible posts', async()=>
   } finally {fs.rmSync(output,{recursive:true,force:true});}
 });
 
+it('keeps waiting for LinkedIn feed cards that render after several empty rounds', async()=>{
+  const output=fs.mkdtempSync(path.join(os.tmpdir(),'clone-card-late-'));
+  const card={post_key:'late',url:'https://linkedin.com/posts/a-activity-1-abcd',text:'Caption',media:[{type:'image',url:'blob:test'}],warnings:[]};
+  let cardRounds=0;
+  const page={goto:vi.fn(),newTab:vi.fn(async()=>'owned'),selectTab:vi.fn(),closeTab:vi.fn(),evaluate:vi.fn(async script=>{
+    if(script.includes('"cards"')) return ++cardRounds>4?[card]:[];
+    if(script.includes('"links"')) return [];
+  })};
+  try {
+    const rows=await postClone('linkedin',page,{url:'https://linkedin.com/company/a/',limit:1,output});
+    expect(rows.filter(row=>row.directory)).toHaveLength(1);
+  } finally {fs.rmSync(output,{recursive:true,force:true});}
+}, 15000);
+
+it('waits for a slow LinkedIn batch after scrolling instead of giving up', async()=>{
+  const output=fs.mkdtempSync(path.join(os.tmpdir(),'clone-card-slow-'));
+  const card=i=>({post_key:String(i),url:`https://linkedin.com/posts/a-activity-${i+1}-abcd`,text:'Caption',media:[{type:'image',url:'blob:test'}],warnings:[]});
+  let height=1000,polls=0;
+  const page={goto:vi.fn(),newTab:vi.fn(async()=>'owned'),selectTab:vi.fn(),closeTab:vi.fn(),evaluate:vi.fn(async script=>{
+    if(script.includes('"cards"')) return Array.from({length:height>1000?6:3},(_,i)=>card(i));
+    if(script.includes('"links"')) return [];
+    if(script.includes('show more results')) return height;
+    if(script==='document.body.scrollHeight') { if(++polls===3) height=2000; return height; }
+  })};
+  try {
+    const rows=await postClone('linkedin',page,{url:'https://linkedin.com/company/a/',limit:5,output});
+    expect(rows.filter(row=>row.directory)).toHaveLength(5);
+  } finally {fs.rmSync(output,{recursive:true,force:true});}
+}, 20000);
+
 it('completes a seven-photo Facebook album beyond the five preview tiles', async()=>{
   let index=0;
   const page={goto:vi.fn(),evaluate:vi.fn(async script=>{
@@ -261,6 +291,27 @@ it('skips videos, reels and mixed carousels before creating files', async () => 
   ]) expect(await savePost(post,'./artifacts/must-not-create','facebook',download)).toMatchObject({status:'skipped',reason:'video-post'});
   expect(download).not.toHaveBeenCalled();
 });
+
+it('reports a reels-only Instagram feed as skipped video posts instead of a missing-link error', async () => {
+  const reels=['https://www.instagram.com/u/reel/A1/','https://www.instagram.com/u/reel/B2/'];
+  const page={goto:vi.fn(),newTab:vi.fn(async()=>'owned'),selectTab:vi.fn(),closeTab:vi.fn(),evaluate:vi.fn(async script=>script.includes('"links"')?reels:undefined)};
+  const rows=await postClone('instagram',page,{url:'https://www.instagram.com/u/',limit:1});
+  expect(rows.filter(row=>row.status==='skipped').map(row=>[row.url,row.reason])).toEqual(reels.map(url=>[url,'video-post']));
+  expect(rows.at(-1)).toMatchObject({status:'partial',downloaded:0,video_posts_skipped:2});
+  expect(page.goto.mock.calls.map(([url])=>url)).toEqual(['https://www.instagram.com/u/']);
+});
+
+it('keeps scrolling past reels to reach Instagram image posts', async () => {
+  const batches=[['https://www.instagram.com/u/reel/A1/'],['https://www.instagram.com/u/reel/A1/','https://www.instagram.com/u/reel/B2/'],['https://www.instagram.com/u/reel/B2/','https://www.instagram.com/u/p/C3/']];
+  let round=0;
+  const page={goto:vi.fn(),newTab:vi.fn(async()=>'owned'),selectTab:vi.fn(),closeTab:vi.fn(),evaluate:vi.fn(async script=>{
+    if(script.includes('"links"')) return batches[Math.min(round++,batches.length-1)];
+    if(script.includes('readInstagram')) return {text:'Image post',media:[],warnings:[]};
+  })};
+  const rows=await postClone('instagram',page,{url:'https://www.instagram.com/u/',limit:1});
+  expect(page.goto.mock.calls.map(([url])=>url)).toContain('https://www.instagram.com/u/p/C3/');
+  expect(rows).toContainEqual(expect.objectContaining({url:'https://www.instagram.com/u/p/C3/',reason:'no-media'}));
+}, 15000);
 
 it('does not create a task tab for a direct reel', async () => {
   const page={goto:vi.fn(),newTab:vi.fn(),selectTab:vi.fn(),closeTab:vi.fn()};

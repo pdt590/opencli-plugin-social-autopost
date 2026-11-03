@@ -264,27 +264,70 @@ const FIND_ENABLED_POST_BUTTON_SCRIPT = `(() => {
 })()`;
 
 export const POST_FEED_HELPERS = `
-  const normalizeCaption = value => String(value || '').replace(/\\s+/g, ' ').trim();
-  const feedPosts = () => Array.from(document.querySelectorAll('[role="article"]'))
-    .filter(elementVisible).flatMap(article => {
-      const message = article.querySelector('[data-ad-preview="message"], [data-ad-comet-preview="message"]');
-      if (!message) return [];
-      return Array.from(article.querySelectorAll('a[href]')).flatMap(link => {
-        let url;
-        try { url = new URL(link.href, location.href); } catch { return []; }
-        if (url.origin !== location.origin) return [];
-        const group = location.pathname.match(/^\\/groups\\/([^/]+)/);
-        if (group && !url.pathname.startsWith('/groups/' + group[1] + '/')) return [];
-        if (!/\\/(posts|permalink)\\/[^/]+/.test(url.pathname)) return [];
-        const id = url.origin + url.pathname.replace(/\\/$/, '');
-        const time = link.querySelector('time');
-        const date = time?.getAttribute('datetime');
-        const labels = [link.innerText, link.getAttribute('aria-label'), time?.textContent].filter(Boolean);
-        const fresh = labels.some(label => /^(just now|vừa xong|vừa mới|刚刚|剛剛)$/i.test(label.trim())) ||
-          (date && Date.parse(date) >= (window.__opencliPostSubmission?.startedAt || Infinity) - 5000);
-        return [{ id, caption: normalizeCaption(message.innerText || message.textContent), fresh: Boolean(fresh) }];
+  const normalizeCaption = value => String(value || '').replace(/\\u034f/g, '').replace(/\\s+/g, ' ').trim();
+  // Feed previews drop emoji images and truncate long captions behind "See more".
+  const SEE_MORE = /\\s*(?:…|\\.\\.\\.)?\\s*(?:see more|xem thêm|查看更多|顯示更多|展开)$/i;
+  // Facebook renders keycap emoji (1️⃣ = "1" + U+FE0F + U+20E3) as images, so the digit vanishes
+  // from the feed text; drop whole keycaps, then stray variation selectors (marks).
+  const captionKey = value => normalizeCaption(value).normalize('NFC').replace(/[0-9#*]\\uFE0F?\\u20E3/g, '')
+    .replace(/[\\uFE00-\\uFE0F\\u20E3]/g, '')
+    .replace(/[^\\p{L}\\p{M}\\p{N}]+/gu, '');
+  const captionMatches = (shown, expected) => {
+    const want = captionKey(expected);
+    if (!want) return false;
+    if (!SEE_MORE.test(shown)) return captionKey(shown) === want;
+    const prefix = captionKey(shown.replace(SEE_MORE, ''));
+    return prefix.length >= Math.min(40, want.length) && want.startsWith(prefix);
+  };
+  // Feeds hide timestamp permalinks behind "?__cft__" until hover, so the post ID
+  // also comes from insights, photo-set and photo links inside the same unit.
+  const group = location.pathname.match(/^\\/groups\\/([^/]+)/);
+  const postRef = (href) => {
+    let url;
+    try { url = new URL(href, location.href); } catch { return null; }
+    if (!/(^|\\.)facebook\\.com$/.test(url.hostname)) return null;
+    const direct = url.pathname.match(/\\/(?:posts|permalink)\\/([^/]+)/);
+    // Inside a group, a direct permalink to elsewhere belongs to embedded shared content.
+    if (direct && group && !url.pathname.startsWith('/groups/')) return null;
+    if (direct) return { id: direct[1], url: url.origin + url.pathname.replace(/\\/$/, '') };
+    const indirect = url.pathname.match(/\\/post_insights\\/(\\d+)/) ||
+      url.search.match(/[?&](?:set=gm\\.|multi_permalinks=|story_fbid=)(\\d+)/);
+    if (indirect) return { id: indirect[1] };
+    // Profile photo posts expose only the photo link; its fbid is new and increasing per upload.
+    const fbid = !group && /^\\/photo(\\.php|\\/)?/.test(url.pathname) && url.searchParams.get('fbid');
+    return /^\\d+$/.test(fbid || '') ? { id: fbid, url: url.origin + '/photo/?fbid=' + fbid } : null;
+  };
+  const feedPosts = () => {
+    const units = new Set(Array.from(document.querySelectorAll('[data-ad-preview="message"], [data-ad-comet-preview="message"]'))
+      .map(message => message.closest('[role="feed"] > *') || message.closest('[aria-posinset]') || message.closest('[role="article"]'))
+      .filter(Boolean));
+    return Array.from(units).filter(elementVisible).flatMap(unit => {
+      const message = unit.querySelector('[data-ad-preview="message"], [data-ad-comet-preview="message"]');
+      const links = Array.from(unit.querySelectorAll('a[href]'));
+      const ref = links.map(link => postRef(link.getAttribute('href'))).find(Boolean);
+      if (!message || !ref) return [];
+      const url = ref.url || (group ? location.origin + '/groups/' + group[1] + '/posts/' + ref.id : null);
+      if (!url) return [];
+      const startedAt = window.__opencliPostSubmission?.startedAt || Infinity;
+      const justNow = links.some(link => [link.innerText, link.getAttribute('aria-label')].filter(Boolean)
+        .some(label => /^(just now|vừa xong|vừa mới|刚刚|剛剛)$/i.test(normalizeCaption(label))));
+      const dated = links.some(link => {
+        const date = link.querySelector('time')?.getAttribute('datetime');
+        return date && Date.parse(date) >= startedAt - 5000;
       });
+      return [{ id: ref.id, url, caption: normalizeCaption(message.innerText || message.textContent), fresh: justNow || dated }];
     });
+  };
+  // Obfuscated timestamps cannot prove freshness; numeric post IDs increase,
+  // so a matching post newer than every pre-submission post is also fresh.
+  const newerThanAll = (id, previous) => {
+    const numeric = previous.filter(value => /^\\d+$/.test(value));
+    return /^\\d+$/.test(id) && numeric.length > 0 && numeric.every(value => BigInt(id) > BigInt(value));
+  };
+  const findSubmittedPost = (submission) => feedPosts().find(post =>
+    captionMatches(post.caption, submission.caption) &&
+    !submission.previousPosts.includes(post.id) &&
+    (post.fresh || newerThanAll(post.id, submission.previousPosts)));
 `;
 
 const CLICK_POST_BUTTON_SCRIPT = `(() => {
@@ -321,7 +364,8 @@ const CLICK_POST_BUTTON_SCRIPT = `(() => {
         previousPosts: feedPosts().map(post => post.id),
       };
       el.click();
-      return { clicked: true, label: text };
+      return { clicked: true, label: text, previousPosts: window.__opencliPostSubmission.previousPosts,
+        startedAt: window.__opencliPostSubmission.startedAt };
     }
   }
   return { clicked: false, reason: 'button-not-found-or-disabled' };
@@ -347,14 +391,26 @@ export const POST_OUTCOME_SCRIPT = `(() => {
   }
   const submission = window.__opencliPostSubmission;
   if (!activeDialog() && submission?.caption && submission.url === location.href) {
-    const post = feedPosts().find(post => post.caption === submission.caption && post.fresh &&
-      !submission.previousPosts.includes(post.id));
+    const post = findSubmittedPost(submission);
     if (post) return {
-      status: 'posted', evidence: 'feed-post', post_url: post.id,
-      message: 'Verified a new, freshly timestamped feed post with the exact submitted caption and a new permalink.',
+      status: 'posted', evidence: 'feed-post', post_url: post.url,
+      message: 'Verified a new, fresh feed post with the submitted caption and a new post ID.',
     };
   }
-  return { status: 'waiting', message: 'Waiting for explicit Facebook publication evidence; composer closure alone is insufficient.' };
+  return { status: 'waiting', composer_open: Boolean(activeDialog()),
+    message: 'Waiting for explicit Facebook publication evidence; composer closure alone is insufficient.' };
+})()`;
+
+// Runs on a freshly loaded feed, so the submission baseline comes from args.
+const RECONCILE_FEED_SCRIPT = `(() => {
+  ${ACTIVE_DIALOG_HELPERS}
+  ${POST_FEED_HELPERS}
+  window.__opencliPostSubmission = { caption: normalizeCaption(caption), startedAt, previousPosts };
+  const post = findSubmittedPost(window.__opencliPostSubmission);
+  return post
+    ? { status: 'posted', evidence: 'feed-reload', post_url: post.url,
+        message: 'Verified after reloading the feed: a new post with the submitted caption and a post ID newer than every pre-submission post.' }
+    : { status: 'waiting' };
 })()`;
 
 export async function openComposer(page, { screenshotDir, timeoutMs = 10000, intervalMs = 250 } = {}) {
@@ -405,7 +461,11 @@ export async function insertCaption(page, caption, { screenshotDir, timeoutMs = 
     let insertedGraphemes = 0;
     onProgress({ insertedGraphemes, totalGraphemes: units.length });
     try {
-      for (let index = 0; index < units.length; index += chunkSize) {
+      for (let index = 0, end; index < units.length; index = end) {
+        // A chunk ending in a line break leaves an empty paragraph; moving the caret
+        // to the editor end can skip it and swallow the break. Keep breaks mid-chunk.
+        end = Math.min(index + chunkSize, units.length);
+        while (end < units.length && /\n/.test(units[end - 1])) end++;
         if (index > 0) {
           await delay(200);
           // React editors can restore a stale selection between insertions.
@@ -413,8 +473,8 @@ export async function insertCaption(page, caption, { screenshotDir, timeoutMs = 
           const caret = await page.evaluate(FOCUS_EDITOR_END_SCRIPT);
           if (!caret?.focused) throw new Error('Composer editor disappeared');
         }
-        await page.insertText(units.slice(index, index + chunkSize).join(''));
-        insertedGraphemes = Math.min(index + chunkSize, units.length);
+        await page.insertText(units.slice(index, end).join(''));
+        insertedGraphemes = end;
         onProgress({ insertedGraphemes, totalGraphemes: units.length });
       }
     } catch (error) {
@@ -499,8 +559,28 @@ export async function pollPostOutcome(page, { timeoutMs = 30000, intervalMs = 50
     ? result
     : {
         status: 'unknown',
+        composer_open: result?.composer_open,
         message: 'Post button clicked but final result is unclear. Check Facebook manually.',
       };
+}
+
+// Read-only fallback: reload the newest-first feed and look for the submitted
+// post. Never resubmits; returns null when the post is still not provable.
+export async function reconcileFeedPost(page, feedUrl, { caption, previousPosts, startedAt, timeoutMs = 20000, intervalMs = 1000 } = {}) {
+  if (!previousPosts?.length) return null;
+  await page.goto(feedUrl, { waitUntil: 'load', settleMs: 3000 });
+  const result = await poll(
+    () => evaluateWithArgs(page, RECONCILE_FEED_SCRIPT, { caption, previousPosts, startedAt }),
+    (state) => state?.status === 'posted',
+    { timeoutMs, intervalMs },
+  );
+  return result?.status === 'posted' ? result : null;
+}
+
+export function chronologicalFeedUrl(groupUrl) {
+  const url = new URL(groupUrl);
+  url.searchParams.set('sorting_setting', 'CHRONOLOGICAL');
+  return url.href;
 }
 
 export async function verifyGroupPageLoaded(page, groupUrl, { screenshotDir } = {}) {
