@@ -54,9 +54,9 @@
     "semantic_hash": ""
   },
   "src/composer.js": {
-    "mtime": 1793682012.8408046,
-    "seen": 1793682077.0833938,
-    "ast_hash": "3870621137fe88ad98242ee18caa78ed",
+    "mtime": 1793758027.0684335,
+    "seen": 1793758037.7435257,
+    "ast_hash": "24d94f5697421f64f10ebfa9f1faa25c",
     "semantic_hash": ""
   },
   "src/images.js": {
@@ -204,9 +204,9 @@
     "semantic_hash": ""
   },
   "tests/post-outcome.test.js": {
-    "mtime": 1793682012.8448048,
-    "seen": 1793682077.08346,
-    "ast_hash": "7a9ebc707cfffcce3a58e05790bcc164",
+    "mtime": 1793758027.0684335,
+    "seen": 1793758037.7435803,
+    "ast_hash": "097779cd5b014da6da9473379a8f4bfc",
     "semantic_hash": ""
   },
   "post-tabs.js": {
@@ -240,9 +240,9 @@
     "semantic_hash": ""
   },
   "skills/social-autopost/SKILL.md": {
-    "mtime": 1793679094.6887224,
-    "seen": 1793679109.6962118,
-    "ast_hash": "d2f03c10df1acd780b995df0ec6cde01",
+    "mtime": 1793758027.0684335,
+    "seen": 1793758037.7436333,
+    "ast_hash": "cb77831d01948e38b6c1055215c1c519",
     "semantic_hash": ""
   },
   "src/task-session.js": {
@@ -369,6 +369,12 @@
     "mtime": 1793678846.893109,
     "seen": 1793679109.6960773,
     "ast_hash": "537ae25114ab7a4ccab30179ca33179e",
+    "semantic_hash": ""
+  },
+  "skills/social-autopost/scripts/clean-caption.py": {
+    "mtime": 1793713178.5291862,
+    "seen": 1793713235.9845035,
+    "ast_hash": "d319da84852129610ef19cf2df9651fa",
     "semantic_hash": ""
   }
 }

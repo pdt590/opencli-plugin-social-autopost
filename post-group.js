@@ -1,5 +1,5 @@
 import { cli, Strategy } from '@jackwener/opencli/registry';
-import { chronologicalFeedUrl, verifyGroupPageLoaded } from './src/composer.js';
+import { verifyGroupPageLoaded } from './src/composer.js';
 import { resolveInputs } from './src/validate.js';
 import { runPost, normalizeInvocation } from './src/post-flow.js';
 export { normalizeInvocation } from './src/post-flow.js';
@@ -10,7 +10,6 @@ export async function postGroup(first, second) {
     resolveInput: kwargs => { const input = resolveInputs(kwargs); return { ...input, targetUrl: input.groupUrl }; },
     verifyTarget: verifyGroupPageLoaded,
     resultTarget: 'groupUrl',
-    reconcileUrl: input => chronologicalFeedUrl(input.groupUrl),
   });
 }
 

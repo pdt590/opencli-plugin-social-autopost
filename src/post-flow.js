@@ -10,14 +10,13 @@ import {
   insertCaption,
   openComposer,
   pollPostOutcome,
-  reconcileFeedPost,
 } from './composer.js';
 import { attachImages } from './images.js';
 import { buildResult } from './result.js';
 import { coerceBoolean, readArg } from './validate.js';
 import { closeTaskSession } from './task-session.js';
 
-export async function runPost(first, second, { resolveInput, verifyTarget, commandName, resultTarget, reconcileUrl }) {
+export async function runPost(first, second, { resolveInput, verifyTarget, commandName, resultTarget }) {
   const { page, kwargs } = normalizeInvocation(first, second);
   if (!page) {
     throw new CommandExecutionError(`Facebook ${commandName} requires a browser page`);
@@ -46,15 +45,15 @@ export async function runPost(first, second, { resolveInput, verifyTarget, comma
       stage = next;
       fs.writeFileSync(progressFile, JSON.stringify({ task_tab: ownedTab, stage, mode: input.mode,
         target_url: input.targetUrl, updated_at: new Date().toISOString(),
-        submission_may_have_started: ['submit-attempt', 'verify-outcome', 'reconcile-outcome', 'complete'].includes(stage) && input.mode === 'live',
+        submission_may_have_started: ['submit-attempt', 'verify-outcome', 'complete'].includes(stage) && input.mode === 'live',
         ...details,
       }, null, 2));
     };
-    rows = await preparePost(page, input, timing, verifyTarget, resultTarget, reportProgress, reconcileUrl);
+    rows = await preparePost(page, input, timing, verifyTarget, resultTarget, reportProgress);
   } catch (error) {
     failure = error;
     failure.message += ` Stage: ${stage}.${progressFile ? ` Progress: ${progressFile}.` : ''}`;
-    if (ownedTab && !['submit-attempt', 'verify-outcome', 'reconcile-outcome', 'complete'].includes(stage)) {
+    if (ownedTab && !['submit-attempt', 'verify-outcome', 'complete'].includes(stage)) {
       try {
         const screenshot = await captureScreenshot(page, input.screenshotDir, 'task-error');
         failure.message += ` Screenshot: ${screenshot}`;
@@ -74,7 +73,7 @@ export async function runPost(first, second, { resolveInput, verifyTarget, comma
   return rows.map(row => ({ ...row, tab_closed: !deferClose && !cleanupError, ...(deferClose ? { task_tab: ownedTab, cleanup_deferred: true } : {}), ...(cleanupError ? { cleanup_warning: cleanupError } : {}) }));
 }
 
-async function preparePost(page, input, timing, verifyTarget, resultTarget, reportProgress, reconcileUrl) {
+async function preparePost(page, input, timing, verifyTarget, resultTarget, reportProgress) {
   reportProgress('navigate');
   await page.goto(input.targetUrl, { waitUntil: 'load', settleMs: 3000 });
   await assertSafePage(page, {
@@ -147,27 +146,13 @@ async function preparePost(page, input, timing, verifyTarget, resultTarget, repo
   }
 
   reportProgress('submit-attempt');
-  const clicked = await clickPostButton(page, {
-    screenshotDir: input.screenshotDir,
-    caption: input.caption,
-  });
+  await clickPostButton(page, { screenshotDir: input.screenshotDir });
   reportProgress('verify-outcome');
-  let outcome = await pollPostOutcome(page, {
+  const outcome = await pollPostOutcome(page, {
     timeoutMs: timing.postOutcomeTimeoutMs,
     intervalMs: timing.postOutcomeIntervalMs,
   });
-  // Only reload once the composer has closed, so an in-flight upload is never abandoned.
-  if (outcome.status === 'unknown' && outcome.composer_open === false && reconcileUrl) {
-    reportProgress('reconcile-outcome');
-    outcome = await reconcileFeedPost(page, reconcileUrl(input), {
-      caption: input.caption,
-      previousPosts: clicked.previousPosts,
-      startedAt: clicked.startedAt,
-      timeoutMs: timing.reconcileTimeoutMs,
-      intervalMs: timing.reconcileIntervalMs,
-    }) || outcome;
-  }
-  reportProgress('complete');
+  reportProgress('complete', { final_status: outcome.status });
 
   return [
     buildResult({

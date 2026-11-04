@@ -51,6 +51,8 @@ Cron helpers (installed in `~/.hermes/skills/social-autopost/scripts/`):
 
 A prior `unknown`, `submitting`, or `pending-review` destination blocks another submission of that same source/content until reconciled; never retry it blindly. It does not by itself block a clearly different, nonduplicate candidate from another approved source. Keep exact source, text, image, semantic dedupe, QA, destination checks, and ledger locks in force. If evidence shows the candidate is the same or substantially overlapping content, stop that candidate rather than weakening dedupe.
 
+Captions for cloned content must be plain text: letters (Vietnamese included), digits, spaces/line breaks and ASCII punctuation only. No emoji, emoji keycaps (1️⃣), variation selectors, arrows (→), bullets (•), curly quotes, en/em dashes, ellipsis characters or other symbols; write lists as `1.` or `-`, arrows as `->`. After writing `caption.txt`, run `python ~/.hermes/skills/social-autopost/scripts/clean-caption.py fix RUN_DIR/caption.txt` and then `check` on the same file; publish only when `check` exits 0, re-read the fixed text for meaning, and take the word count after fixing. This applies to every destination and to captions written for clone-and-publish requests outside cron.
+
 Source-branded images are eligible. Logos, watermarks, handles or "Follow <source>" calls-to-action already inside a source image are part of the image content: publish the image unchanged (no cropping, blurring or editing to remove them) and do not block, skip or ask about it. The no-credit rule applies only to text the run writes (caption, comments): never add source names, credits or source links there.
 
 #### Page images: download, then upload into the post
@@ -74,7 +76,7 @@ Always use `--slow true --timeout 600`, including requested dry-runs. Allow the 
 
 Image upload uses Base64 via browser `DataTransfer` first. Use native `setFileInput` paths only if Base64 fails and the browser confirms no files attached. If attachment state is ambiguous, stop to avoid duplicates. Preview timeout does not trigger another upload. For browser `upload_file` errors `Access denied` or `not within any of the configured workspace roots`, do not retry that path or copy the file elsewhere; install/update this checkout with `node scripts/install-plugin.js` and use the appropriate post command.
 
-For live posts: verify image previews and exact caption; click Post once; wait for outcome; read evidence; close the owned tab. **Do not take screenshots after clicking Post**, including for `unknown` or post-submit errors. Pre-submit diagnostic screenshots are allowed. Upload success alone does not prove publication.
+For live posts: verify image previews and exact caption; click Post once; wait for the composer to close; close the owned tab. **Do not take screenshots after clicking Post**, including for `unknown` or post-submit errors. Pre-submit diagnostic screenshots are allowed. Upload success alone does not prove publication.
 
 ```sh
 opencli facebook post-person --caption-file caption.txt --images "photo1.jpg,photo2.png" --slow true --timeout 600 --confirm true
@@ -83,7 +85,7 @@ opencli facebook post-group --group-url "https://www.facebook.com/groups/<id>" -
 
 Use `--caption` or `--caption-file`, never both; use literal arguments, not shell interpolation. For an explicitly requested browser draft, use `--dry-run true` instead of `--confirm true`. Personal posts target `/me` and verify the user's personal identity, not a Page. Verify the returned profile/group target; preserve text, image order and audience. Recheck identity before publishing; never silently switch accounts or reuse a completed request as permission to post again.
 
-Report `posted` only with fresh success evidence and a closed composer, or a newly verified feed post with the submitted caption (a "See more" preview prefix counts) and a new post ID that is fresh or newer than every pre-submission post. `evidence: feed-post`/`feed-reload` with `post_url` is valid proof; `feed-reload` means post-group reloaded the newest-first group feed read-only after the composer closed. `pending-review` awaits approval; `failed` is an observed error; `unknown` is unverified. Never automatically retry failed/unknown posts. Results return `screenshot: null`. On timeout, inspect `progress-<task_tab>.json`: `insert-caption`/`attach-images` is preparation; `submit-attempt` or later means submission may have started.
+A successful Post click whose composer then closes returns `status: posted` with `evidence: post-click`. Accept that as final: record the target as posted and do not read back, search the feed, open the member page or otherwise re-verify group/personal posts (no `post_url` is returned). `failed` means Facebook showed an error notice after the click; `unknown` means the composer did not close within the outcome wait, so submission may still be in progress. Never automatically retry failed/unknown posts. Results return `screenshot: null`. On timeout, inspect `progress-<task_tab>.json`: `insert-caption`/`attach-images` is preparation; `submit-attempt` or later means submission may have started.
 
 ## Explicit tab retention
 

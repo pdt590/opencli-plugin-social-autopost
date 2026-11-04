@@ -263,76 +263,10 @@ const FIND_ENABLED_POST_BUTTON_SCRIPT = `(() => {
   return { found: false, reason: 'button-not-found' };
 })()`;
 
-export const POST_FEED_HELPERS = `
-  const normalizeCaption = value => String(value || '').replace(/\\u034f/g, '').replace(/\\s+/g, ' ').trim();
-  // Feed previews drop emoji images and truncate long captions behind "See more".
-  const SEE_MORE = /\\s*(?:…|\\.\\.\\.)?\\s*(?:see more|xem thêm|查看更多|顯示更多|展开)$/i;
-  // Facebook renders keycap emoji (1️⃣ = "1" + U+FE0F + U+20E3) as images, so the digit vanishes
-  // from the feed text; drop whole keycaps, then stray variation selectors (marks).
-  const captionKey = value => normalizeCaption(value).normalize('NFC').replace(/[0-9#*]\\uFE0F?\\u20E3/g, '')
-    .replace(/[\\uFE00-\\uFE0F\\u20E3]/g, '')
-    .replace(/[^\\p{L}\\p{M}\\p{N}]+/gu, '');
-  const captionMatches = (shown, expected) => {
-    const want = captionKey(expected);
-    if (!want) return false;
-    if (!SEE_MORE.test(shown)) return captionKey(shown) === want;
-    const prefix = captionKey(shown.replace(SEE_MORE, ''));
-    return prefix.length >= Math.min(40, want.length) && want.startsWith(prefix);
-  };
-  // Feeds hide timestamp permalinks behind "?__cft__" until hover, so the post ID
-  // also comes from insights, photo-set and photo links inside the same unit.
-  const group = location.pathname.match(/^\\/groups\\/([^/]+)/);
-  const postRef = (href) => {
-    let url;
-    try { url = new URL(href, location.href); } catch { return null; }
-    if (!/(^|\\.)facebook\\.com$/.test(url.hostname)) return null;
-    const direct = url.pathname.match(/\\/(?:posts|permalink)\\/([^/]+)/);
-    // Inside a group, a direct permalink to elsewhere belongs to embedded shared content.
-    if (direct && group && !url.pathname.startsWith('/groups/')) return null;
-    if (direct) return { id: direct[1], url: url.origin + url.pathname.replace(/\\/$/, '') };
-    const indirect = url.pathname.match(/\\/post_insights\\/(\\d+)/) ||
-      url.search.match(/[?&](?:set=gm\\.|multi_permalinks=|story_fbid=)(\\d+)/);
-    if (indirect) return { id: indirect[1] };
-    // Profile photo posts expose only the photo link; its fbid is new and increasing per upload.
-    const fbid = !group && /^\\/photo(\\.php|\\/)?/.test(url.pathname) && url.searchParams.get('fbid');
-    return /^\\d+$/.test(fbid || '') ? { id: fbid, url: url.origin + '/photo/?fbid=' + fbid } : null;
-  };
-  const feedPosts = () => {
-    const units = new Set(Array.from(document.querySelectorAll('[data-ad-preview="message"], [data-ad-comet-preview="message"]'))
-      .map(message => message.closest('[role="feed"] > *') || message.closest('[aria-posinset]') || message.closest('[role="article"]'))
-      .filter(Boolean));
-    return Array.from(units).filter(elementVisible).flatMap(unit => {
-      const message = unit.querySelector('[data-ad-preview="message"], [data-ad-comet-preview="message"]');
-      const links = Array.from(unit.querySelectorAll('a[href]'));
-      const ref = links.map(link => postRef(link.getAttribute('href'))).find(Boolean);
-      if (!message || !ref) return [];
-      const url = ref.url || (group ? location.origin + '/groups/' + group[1] + '/posts/' + ref.id : null);
-      if (!url) return [];
-      const startedAt = window.__opencliPostSubmission?.startedAt || Infinity;
-      const justNow = links.some(link => [link.innerText, link.getAttribute('aria-label')].filter(Boolean)
-        .some(label => /^(just now|vừa xong|vừa mới|刚刚|剛剛)$/i.test(normalizeCaption(label))));
-      const dated = links.some(link => {
-        const date = link.querySelector('time')?.getAttribute('datetime');
-        return date && Date.parse(date) >= startedAt - 5000;
-      });
-      return [{ id: ref.id, url, caption: normalizeCaption(message.innerText || message.textContent), fresh: justNow || dated }];
-    });
-  };
-  // Obfuscated timestamps cannot prove freshness; numeric post IDs increase,
-  // so a matching post newer than every pre-submission post is also fresh.
-  const newerThanAll = (id, previous) => {
-    const numeric = previous.filter(value => /^\\d+$/.test(value));
-    return /^\\d+$/.test(id) && numeric.length > 0 && numeric.every(value => BigInt(id) > BigInt(value));
-  };
-  const findSubmittedPost = (submission) => feedPosts().find(post =>
-    captionMatches(post.caption, submission.caption) &&
-    !submission.previousPosts.includes(post.id) &&
-    (post.fresh || newerThanAll(post.id, submission.previousPosts)));
-`;
+const NOTICE_SELECTOR = '[role="alert"], [role="status"], [aria-live="polite"], [aria-live="assertive"]';
 
 const CLICK_POST_BUTTON_SCRIPT = `(() => {
   ${ACTIVE_DIALOG_HELPERS}
-  ${POST_FEED_HELPERS}
   const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim().toLowerCase();
   const labelSet = labels.map(normalize).filter(Boolean);
   const dialog = activeDialog();
@@ -354,63 +288,31 @@ const CLICK_POST_BUTTON_SCRIPT = `(() => {
     if (matched && !disabled(el)) {
       el.scrollIntoView({ block: 'center', inline: 'center' });
       window.__opencliPostNotices = new Map(
-        Array.from(document.querySelectorAll('[role="alert"], [role="status"], [aria-live="polite"], [aria-live="assertive"]'))
+        Array.from(document.querySelectorAll(${JSON.stringify(NOTICE_SELECTOR)}))
           .map(node => [node, node.innerText || node.textContent || ''])
       );
-      window.__opencliPostSubmission = {
-        caption: normalizeCaption(expectedCaption),
-        startedAt: Date.now(),
-        url: location.href,
-        previousPosts: feedPosts().map(post => post.id),
-      };
       el.click();
-      return { clicked: true, label: text, previousPosts: window.__opencliPostSubmission.previousPosts,
-        startedAt: window.__opencliPostSubmission.startedAt };
+      return { clicked: true, label: text };
     }
   }
   return { clicked: false, reason: 'button-not-found-or-disabled' };
 })()`;
 
+// After a Post click, the click itself is the publication signal. Wait only for
+// the composer to close (closing the tab earlier could abort an upload) and for
+// an explicit error notice; no feed verification.
 export const POST_OUTCOME_SCRIPT = `(() => {
   ${ACTIVE_DIALOG_HELPERS}
-  ${POST_FEED_HELPERS}
-  const baseline = window.__opencliPostNotices;
-  if (!(baseline instanceof Map)) return { status: 'waiting', message: 'No submission evidence baseline.' };
-  const notices = Array.from(document.querySelectorAll('[role="alert"], [role="status"], [aria-live="polite"], [aria-live="assertive"]'))
+  const baseline = window.__opencliPostNotices instanceof Map ? window.__opencliPostNotices : new Map();
+  const text = Array.from(document.querySelectorAll(${JSON.stringify(NOTICE_SELECTOR)}))
     .filter(elementVisible)
-    .filter(node => !node.querySelector('[role="article"], [data-ad-preview="message"]'))
-    .filter(node => baseline.get(node) !== (node.innerText || node.textContent || ''));
-  const text = notices.map(node => node.innerText || node.textContent || '').join(' ').replace(/\\s+/g, ' ').trim();
-  const pending = /pending approval|submitted for review|submitted to (the )?admins?|your post is pending|đang chờ phê duyệt|đang chờ duyệt|đã gửi.*phê duyệt|等待批准|待审核|待審核/i;
+    .filter(node => baseline.get(node) !== (node.innerText || node.textContent || ''))
+    .map(node => node.innerText || node.textContent || '').join(' ').replace(/\\s+/g, ' ').trim();
   const failed = /action blocked|you can't post right now|try again later|failed to post|couldn't publish|couldn't post|không thể đăng|đăng bài thất bại|无法发布|無法發布/i;
-  const success = /your post (is now published|was published|has been published|was shared|has been shared)|post published|posted successfully|bài viết (của bạn )?đã được (đăng|chia sẻ)|đăng bài thành công|发布成功|發佈成功/i;
-  if (failed.test(text)) return { status: 'failed', message: 'Facebook showed a new posting error after submission.' };
-  if (pending.test(text)) return { status: 'pending-review', message: 'Facebook confirmed submission for review; not published yet.' };
-  if (!activeDialog() && success.test(text)) {
-    return { status: 'posted', message: 'Facebook displayed a new publication success notification after submission.' };
-  }
-  const submission = window.__opencliPostSubmission;
-  if (!activeDialog() && submission?.caption && submission.url === location.href) {
-    const post = findSubmittedPost(submission);
-    if (post) return {
-      status: 'posted', evidence: 'feed-post', post_url: post.url,
-      message: 'Verified a new, fresh feed post with the submitted caption and a new post ID.',
-    };
-  }
-  return { status: 'waiting', composer_open: Boolean(activeDialog()),
-    message: 'Waiting for explicit Facebook publication evidence; composer closure alone is insufficient.' };
-})()`;
-
-// Runs on a freshly loaded feed, so the submission baseline comes from args.
-const RECONCILE_FEED_SCRIPT = `(() => {
-  ${ACTIVE_DIALOG_HELPERS}
-  ${POST_FEED_HELPERS}
-  window.__opencliPostSubmission = { caption: normalizeCaption(caption), startedAt, previousPosts };
-  const post = findSubmittedPost(window.__opencliPostSubmission);
-  return post
-    ? { status: 'posted', evidence: 'feed-reload', post_url: post.url,
-        message: 'Verified after reloading the feed: a new post with the submitted caption and a post ID newer than every pre-submission post.' }
-    : { status: 'waiting' };
+  if (failed.test(text)) return { status: 'failed', message: 'Facebook showed a posting error after the Post click.' };
+  if (activeDialog()) return { status: 'waiting', composer_open: true };
+  return { status: 'posted', evidence: 'post-click',
+    message: 'Post was clicked and the composer closed; treated as posted without feed verification.' };
 })()`;
 
 export async function openComposer(page, { screenshotDir, timeoutMs = 10000, intervalMs = 250 } = {}) {
@@ -529,7 +431,7 @@ export async function findEnabledPostButton(page) {
   });
 }
 
-export async function clickPostButton(page, { screenshotDir, caption = '' } = {}) {
+export async function clickPostButton(page, { screenshotDir } = {}) {
   const state = await findEnabledPostButton(page);
   if (!state?.found || !state.enabled) {
     const screenshot = await captureScreenshot(page, screenshotDir, 'post-button-not-ready');
@@ -538,7 +440,6 @@ export async function clickPostButton(page, { screenshotDir, caption = '' } = {}
 
   const clicked = await evaluateWithArgs(page, CLICK_POST_BUTTON_SCRIPT, {
     labels: POST_BUTTON_LABELS,
-    expectedCaption: caption,
   });
   if (!clicked?.clicked) {
     const screenshot = await captureScreenshot(page, screenshotDir, 'post-button-click-failed');
@@ -548,7 +449,7 @@ export async function clickPostButton(page, { screenshotDir, caption = '' } = {}
   return clicked;
 }
 
-export async function pollPostOutcome(page, { timeoutMs = 30000, intervalMs = 500 } = {}) {
+export async function pollPostOutcome(page, { timeoutMs = 120000, intervalMs = 500 } = {}) {
   const result = await poll(
     () => page.evaluate(POST_OUTCOME_SCRIPT),
     (state) => state?.status && state.status !== 'waiting',
@@ -560,27 +461,8 @@ export async function pollPostOutcome(page, { timeoutMs = 30000, intervalMs = 50
     : {
         status: 'unknown',
         composer_open: result?.composer_open,
-        message: 'Post button clicked but final result is unclear. Check Facebook manually.',
+        message: 'Post button clicked but the composer did not close in time. Check Facebook manually.',
       };
-}
-
-// Read-only fallback: reload the newest-first feed and look for the submitted
-// post. Never resubmits; returns null when the post is still not provable.
-export async function reconcileFeedPost(page, feedUrl, { caption, previousPosts, startedAt, timeoutMs = 20000, intervalMs = 1000 } = {}) {
-  if (!previousPosts?.length) return null;
-  await page.goto(feedUrl, { waitUntil: 'load', settleMs: 3000 });
-  const result = await poll(
-    () => evaluateWithArgs(page, RECONCILE_FEED_SCRIPT, { caption, previousPosts, startedAt }),
-    (state) => state?.status === 'posted',
-    { timeoutMs, intervalMs },
-  );
-  return result?.status === 'posted' ? result : null;
-}
-
-export function chronologicalFeedUrl(groupUrl) {
-  const url = new URL(groupUrl);
-  url.searchParams.set('sorting_setting', 'CHRONOLOGICAL');
-  return url.href;
 }
 
 export async function verifyGroupPageLoaded(page, groupUrl, { screenshotDir } = {}) {
