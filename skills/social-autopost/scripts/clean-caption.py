@@ -3,7 +3,7 @@
 
   clean-caption.py check FILE   exit 0 when clean; exit 1 and list offending characters otherwise
   clean-caption.py fix FILE     rewrite FILE in place: map common typographic symbols to ASCII,
-                                drop emoji and every other disallowed character, tidy spaces,
+                                drop emoji (except number keycaps like 1️⃣) and every other disallowed character, tidy spaces,
                                 then print the same report as `check`
 """
 import json
@@ -28,9 +28,13 @@ def allowed(char):
     return category[0] in 'LN' or (category in ('Mn', 'Mc') and not 0xFE00 <= ord(char) <= 0xFE0F)
 
 
+# Number keycap emoji (0️⃣-9️⃣, 🔟) are the only emoji kept, for numbered lists.
+KEYCAP = re.compile('[0-9]\ufe0f?\u20e3|\U0001F51F')
+
+
 def offending(text):
     found = {}
-    for char in text:
+    for char in KEYCAP.sub('', text):
         if not allowed(char):
             found[f'U+{ord(char):04X}'] = unicodedata.name(char, 'UNKNOWN')
     return found
@@ -38,10 +42,14 @@ def offending(text):
 
 def clean(text):
     text = unicodedata.normalize('NFC', text.replace('\r\n', '\n'))
-    # Keycap emoji (1️⃣) keep their digit as plain text: "1."
-    text = re.sub(r'([0-9#*])️?⃣', lambda m: m[1] + ('.' if m[1].isdigit() else ''), text)
-    text = ''.join(REPLACE.get(char, char) for char in text)
-    text = ''.join(char for char in text if allowed(char))
+    # Keep number keycaps (1️⃣, 🔟) intact; clean everything between them.
+    parts, last = [], 0
+    for match in KEYCAP.finditer(text):
+        parts.append(''.join(c for c in map(lambda c: REPLACE.get(c, c), text[last:match.start()]) for c in c if allowed(c)))
+        parts.append(match[0])
+        last = match.end()
+    parts.append(''.join(c for c in ''.join(REPLACE.get(c, c) for c in text[last:]) if allowed(c)))
+    text = ''.join(parts)
     text = re.sub(r'[ ]{2,}', ' ', text)
     text = '\n'.join(line.strip() for line in text.split('\n'))
     return re.sub(r'\n{3,}', '\n\n', text).strip() + '\n'
